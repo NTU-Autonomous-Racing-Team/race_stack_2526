@@ -20,7 +20,7 @@ class ControllerManager(Node):
         self.declare_parameter("odom_topic", "/ego_racecar/odom")
         self.declare_parameter("drive_topic", "/drive")
         self.declare_parameter("min_lookahead", 2.0)
-        self.declare_parameter("max_lookahead", 3.0)
+        self.declare_parameter("max_lookahead", 4.0)
         self.declare_parameter("lookahead_ratio", 8.0)
         self.declare_parameter("K_p", 0.5)
         self.declare_parameter("steering_limit", 25.0) # Degrees
@@ -60,6 +60,10 @@ class ControllerManager(Node):
         self.create_timer(1.0, self.publish_static_path)
 
     def state_callback(self, msg):
+        if msg.data != self.current_state:
+            self.get_logger().info(f"--- STATE SWITCH: {self.current_state} -> {msg.data} ---")
+            if msg.data == "GB_TRACK":
+                self.ftg_logic.prev_steering = 0.0
         self.current_state = msg.data
     
     def scan_callback(self, msg):
@@ -71,6 +75,7 @@ class ControllerManager(Node):
         return np.arctan2(siny_cosp, cosy_cosp)
 
     def odom_callback(self, msg):
+        self.get_logger().info(f"DEBUG: Active Logic: {self.current_state}", throttle_duration_sec=1.0)
         self.curr_velocity = msg.twist.twist.linear.x
         
         if self.current_state == "FTGONLY":
@@ -83,7 +88,7 @@ class ControllerManager(Node):
             return
             
         speed, steer = self.ftg_logic.process_lidar(self.latest_scan)
-        self.get_logger().warn(f"FTG Active: Steer={steer:.2f}, Speed={speed:.2f}", throttle_duration_sec=1.0)
+        # self.get_logger().warn(f"FTG Active: Steer={steer:.2f}, Speed={speed:.2f}", throttle_duration_sec=1.0)
         self.publish_drive(steer, speed)
 
     def execute_pure_pursuit_logic(self, msg):

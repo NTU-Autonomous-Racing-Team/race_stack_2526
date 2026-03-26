@@ -2,7 +2,7 @@ import numpy as np
 
 class FTGLogic:
     def __init__(self):
-        self.max_speed = 8.0 
+        self.max_speed = 3.0 
         self.max_steering = 0.40  
         self.car_width = 0.50     
         self.prev_steering = 0.0
@@ -34,7 +34,7 @@ class FTGLogic:
         ranges[np.isinf(ranges)] = 10.0
         
         center = len(ranges) // 2
-        fov = int(75 / (msg.angle_increment * 180 / np.pi)) 
+        fov = int(50 / (msg.angle_increment * 180 / np.pi)) 
         start, end = center - fov, center + fov
         forward_ranges = ranges[start:end].copy()
 

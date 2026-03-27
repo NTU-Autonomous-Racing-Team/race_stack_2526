@@ -1,9 +1,9 @@
-  #!/usr/bin/env python3
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 import numpy as np
 import tf2_ros
-from nav_msgs.msg import Odometry, Path
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 from ackermann_msgs.msg import AckermannDriveStamped
@@ -26,7 +26,6 @@ class ControllerManager(Node):
         self.declare_parameter("steering_limit", 25.0) # Degrees
         self.declare_parameter("velocity_percentage", 0.6)
         self.declare_parameter("wheelbase", 0.33)
-        self.declare_parameter("local_path_topic", "/local_path")
 
         self.path = self.get_parameter("waypoints_path").value
         self.odom_topic = self.get_parameter("odom_topic").value
@@ -38,24 +37,20 @@ class ControllerManager(Node):
         self.steer_limit = np.radians(self.get_parameter("steering_limit").value)
         self.vel_percent = self.get_parameter("velocity_percentage").value
         self.wheelbase = self.get_parameter("wheelbase").value
-        self.local_path_topic = self.get_parameter("local_path_topic").value
 
         # 2. Initialize Logic & Data
         self.waypoints = np.loadtxt(self.path, delimiter=',', skiprows=1) # Assume x, y, v
         self.pure_pursuit_logic = PurePursuitLogic(self.wheelbase, self.waypoints)
-        self.local_pursuit_logic = PurePursuitLogic(self.wheelbase, []) # Empty initially
         self.ftg_logic = FTGLogic()
         self.curr_velocity = 0.0
-        self.current_state = "LOCAL_PLAN" # Optimized Default 
+        self.current_state = "GB_TRACK" 
         self.latest_scan = None
-        self.local_path_received = False
 
         # 3. Pubs & Subs
         self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 10)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
-        self.local_path_sub = self.create_subscription(Path, self.local_path_topic, self.local_path_callback, 10)
 
         self.get_logger().info("Pure Pursuit Node Started")
         self.viz_pub = self.create_publisher(Marker, '/waypoint_markers', 10)
@@ -74,23 +69,6 @@ class ControllerManager(Node):
     def scan_callback(self, msg):
         self.latest_scan = msg
 
-    def local_path_callback(self, msg):
-        """ Convert Path msg to numpy array and update local pursuit logic. """
-        if not msg.poses:
-            return
-            
-        new_wps = []
-        for pose_stamped in msg.poses:
-            new_wps.append([
-                pose_stamped.pose.position.x,
-                pose_stamped.pose.position.y,
-                2.5 # Default speed for local path points if not specified
-            ])
-        
-        self.local_pursuit_logic.update_waypoints(np.array(new_wps))
-        self.local_path_received = True
-        # self.get_logger().info("Updated local path waypoints.")
-
     def get_yaw_from_quat(self, q):
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
@@ -102,36 +80,8 @@ class ControllerManager(Node):
         
         if self.current_state == "FTGONLY":
             self.execute_ftg_logic()
-        elif self.current_state == "LOCAL_PLAN" and self.local_path_received:
-            self.execute_local_path_logic(msg)
         else:
             self.execute_pure_pursuit_logic(msg)
-    
-    def execute_local_path_logic(self, msg):
-        car_x = msg.pose.pose.position.x
-        car_y = msg.pose.pose.position.y
-        car_yaw = self.get_yaw_from_quat(msg.pose.pose.orientation)
-
-        # Dynamic Lookahead
-        la_ratio = self.get_parameter("lookahead_ratio").value
-        min_la = self.get_parameter("min_lookahead").value
-        max_la = self.get_parameter("max_lookahead").value
-        lookahead_dist = np.clip(max_la * self.curr_velocity / la_ratio, min_la, max_la)
-
-        target_pt_car, actual_la, target_idx = self.local_pursuit_logic.find_target_waypoint(
-            car_x, car_y, car_yaw, lookahead_dist
-        )
-
-        if target_idx == -1:
-            # Fallback to global if local fails
-            self.execute_pure_pursuit_logic(msg)
-            return
-
-        self.visualize_lookahead_point(self.local_pursuit_logic.waypoints[target_idx])
-        steer = self.local_pursuit_logic.calculate_steering(target_pt_car, actual_la, self.kp)
-        target_vel = self.local_pursuit_logic.waypoints[target_idx, 2] * self.vel_percent
-        
-        self.publish_drive(steer, target_vel)
     
     def execute_ftg_logic(self):
         if self.latest_scan is None:

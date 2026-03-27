@@ -3,8 +3,12 @@ import numpy as np
 class PurePursuitLogic:
     def __init__(self, wheelbase, waypoints):
         self.L = wheelbase
-        self.waypoints = waypoints
-        self.num_waypoints = len(waypoints)
+        self.update_waypoints(waypoints)
+
+    def update_waypoints(self, waypoints):
+        """ Update the list of waypoints and reset the current index. """
+        self.waypoints = np.array(waypoints)
+        self.num_waypoints = len(self.waypoints)
         self.current_idx = 0
 
     #transform from map frame to baselink frame

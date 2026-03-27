@@ -1,0 +1,17 @@
+# ROS 2 Build folders
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE / System
+.vscode/
+.DS_Store
+.idea/
+
+# Agent Artifacts
+.gemini/
+.agents/

@@ -7,7 +7,13 @@ git clone --recursive https://github.com/NTU-Autonomous-Racing-Team/race_stack_2
 
 ### Running the Race Stack
 
-Execute the following command to start the simulation:
+First, execute the following command to start the simulator:
+
+```bash
+bash simulate.sh
+```
+
+Then, open another terminal to execute the following code to get the car moving:
 
 ```bash
 bash run.sh

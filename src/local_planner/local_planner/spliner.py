@@ -5,6 +5,7 @@ from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
 from scipy.interpolate import CubicSpline
 import os
+from .frenet_converter import FrenetConverter
 
 class SplinerNode(Node):
     def __init__(self):
@@ -16,12 +17,18 @@ class SplinerNode(Node):
         self.declare_parameter("local_path_topic", "/local_path")
         self.declare_parameter("num_future_waypoints", 5) 
         self.declare_parameter("path_resolution", 20)     
+        self.declare_parameter("obs_threshold", 0.5)
+        self.declare_parameter("evasion_dist", 0.65)
+        self.declare_parameter("spline_bound_mindist", 0.5)
 
         self.path_to_csv = self.get_parameter("waypoints_path").value
         self.odom_topic = self.get_parameter("odom_topic").value
         self.local_path_topic = self.get_parameter("local_path_topic").value
         self.num_future = self.get_parameter("num_future_waypoints").value
         self.resolution = self.get_parameter("path_resolution").value
+        self.obs_threshold = self.get_parameter("obs_threshold").value
+        self.evasion_dist = self.get_parameter("evasion_dist").value
+        self.spline_bound_mindist = self.get_parameter("spline_bound_mindist").value
 
         # Load Global Waypoints
         if not os.path.exists(self.path_to_csv):
@@ -32,58 +39,139 @@ class SplinerNode(Node):
         try:
             self.waypoints = np.loadtxt(self.path_to_csv, delimiter=',', skiprows=1)
             self.get_logger().info(f"Loaded {len(self.waypoints)} waypoints.")
+            
+            # Initialize Frenet Converter
+            self.frenet_converter = FrenetConverter(self.waypoints)
+            self.track_length = self.frenet_converter.total_length
+            self.get_logger().info(f"Frenet Converter initialized. Track length: {self.track_length:.2f}m")
+            
         except Exception as e:
-            self.get_logger().error(f"Failed to load waypoints: {e}")
+            self.get_logger().error(f"Failed to load waypoints or initialize Frenet: {e}")
             self.waypoints = None
+            self.frenet_converter = None
+            self.track_length = 0.0
 
         # State
         self.curr_pos = None
+        self.current_vs=0.0
+        self.obstacles=[]
 
         # Pubs & Subs
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
+        #subscribe to ObstacleArray when possible
+        # self.obstacle_sub = self.create_subscription(Obstacles, "/obstacles", self.obstacle_callback, 10)
         self.path_pub = self.create_publisher(Path, self.local_path_topic, 10)
-
         self.get_logger().info("Spliner Node initialized and waiting for Odometry...")
 
-    def find_nearest_waypoint_idx(self, x, y):
-        """ Find the index of the nearest global waypoint. """
-        if self.waypoints is None:
-            return -1
-        dists = np.linalg.norm(self.waypoints[:, :2] - np.array([x, y]), axis=1)
-        return np.argmin(dists)
+    # def obstacle_callback(self, msg):
+    #     self.obstacles = msg.obstacles
+    
+    def filter_obstacles(self, all_obstacles, ego_s, lookahead_dist=10.0):
+        close_obstacles = []
+        for obs in all_obstacles:
+            dist_s = (obs.s - ego_s) % self.track_length 
+            
+            if dist_s < lookahead_dist and abs(obs.d) < self.obs_threshold:
+                close_obstacles.append(obs)
+                
+        return min(close_obstacles, key=lambda o: (o.s - ego_s) % self.track_length) if close_obstacles else None
+
+    def decide_evasive_side(self, obstacle, nearest_wpnt):
+        buffer = self.evasion_dist
+        min_space = buffer + self.spline_bound_mindist
+        
+        left_gap = abs(nearest_wpnt.d_left - obstacle.d_left)
+        right_gap = abs(nearest_wpnt.d_right + obstacle.d_right)
+
+        if left_gap > min_space and right_gap < min_space:
+            side = "left"
+            d_apex = obstacle.d_left + buffer
+        elif right_gap > min_space and left_gap < min_space:
+            side = "right"
+            d_apex = obstacle.d_right - buffer
+        else:
+            candidate_left = obstacle.d_left + buffer
+            candidate_right = obstacle.d_right - buffer
+            
+            if abs(candidate_left) <= abs(candidate_right):
+                side = "left"
+                d_apex = candidate_left
+            else:
+                side = "right"
+                d_apex = candidate_right
+
+        d_apex = np.clip(d_apex, nearest_wpnt.d_right + 0.2, nearest_wpnt.d_left - 0.2)
+        
+        return side, d_apex
+
+    def generate_spline_points(self, s_apex, d_apex, current_vs):
+       
+        scale = np.clip(1.0 + current_vs / 10.0, 1.0, 1.5) 
+        
+        pre_dist = [-5.0 * scale, -2.5 * scale]  # P-2, P-1
+        post_dist = [2.5 * scale, 5.0 * scale]   # P1, P2
+        
+        control_points = []
+        
+        control_points.append([s_apex + pre_dist[0], 0.0])
+        control_points.append([s_apex + pre_dist[1], d_apex * 0.5]) 
+        
+        control_points.append([s_apex, d_apex])
+        
+        control_points.append([s_apex + post_dist[0], d_apex * 0.5]) 
+        control_points.append([s_apex + post_dist[1], 0.0])
+        
+        return np.array(control_points)
 
     def odom_callback(self, msg):
         self.curr_pos = [msg.pose.pose.position.x, msg.pose.pose.position.y]
+        self.current_vs = msg.twist.twist.linear.x
         
-        if self.waypoints is None:
+        if self.waypoints is None or self.frenet_converter is None:
             return
 
-        nearest_idx = self.find_nearest_waypoint_idx(self.curr_pos[0], self.curr_pos[1])
-        if nearest_idx == -1:
-            return
+        ego_s, ego_d = self.frenet_converter.get_frenet(self.curr_pos[0], self.curr_pos[1])
 
-        # Points: Current position + next N future waypoints
-        spline_points = [self.curr_pos]
-        for i in range(1, self.num_future + 1):
-            idx = (nearest_idx + i) % len(self.waypoints)
-            spline_points.append(self.waypoints[idx, :2])
+        target_obs = self.filter_obstacles(self.obstacles, ego_s)
 
-        spline_points = np.array(spline_points)
+        if target_obs:
+            obs_x, obs_y = self.frenet_converter.get_cartesian(target_obs.s, 0.0)
+            
+            dists = np.linalg.norm(self.waypoints[:, :2] - np.array([obs_x, obs_y]), axis=1)
+            nearest_idx = np.argmin(dists)
 
-        t = np.linspace(0, 1, len(spline_points))
-        cs_x = CubicSpline(t, spline_points[:, 0])
-        cs_y = CubicSpline(t, spline_points[:, 1])
-
-        # Generate smooth path
-        t_smooth = np.linspace(0, 1, self.resolution)
-        smooth_x = cs_x(t_smooth)
-        smooth_y = cs_y(t_smooth)
+            class Waypoint:
+                def __init__(self, d_left, d_right):
+                    self.d_left = d_left
+                    self.d_right = d_right
+            
+            nearest_wpnt = Waypoint(d_left=3.0, d_right=-3.0) 
+            
+            side, d_apex = self.decide_evasive_side(target_obs, nearest_wpnt)
+            
+            s_apex = target_obs.s
+            if s_apex < ego_s:
+                s_apex += self.track_length
+                
+            control_points = self.generate_spline_points(s_apex, d_apex, self.current_vs)
+            
+            s_ctrl = control_points[:, 0]
+            d_ctrl = control_points[:, 1]
+            cs_d = CubicSpline(s_ctrl, d_ctrl, bc_type='clamped')
+            
+            s_smooth = np.linspace(s_ctrl[0], s_ctrl[-1], self.resolution)
+            d_smooth = cs_d(s_smooth)
+            
+        else:
+            s_smooth = np.linspace(ego_s, ego_s + 10.0, self.resolution)
+            d_smooth = np.zeros_like(s_smooth)
 
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = "map"
 
-        for x, y in zip(smooth_x, smooth_y):
+        for s, d in zip(s_smooth, d_smooth):
+            x, y = self.frenet_converter.get_cartesian(s, d)
             pose = PoseStamped()
             pose.header = path_msg.header
             pose.pose.position.x = float(x)

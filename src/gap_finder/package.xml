@@ -10,7 +10,7 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>ackermann_msgs</depend>
-  <depend>std_msgs</depend>
+  <depend>f110_msgs</depend>
   <exec_depend>state_machine</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

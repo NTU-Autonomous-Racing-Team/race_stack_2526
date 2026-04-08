@@ -6,7 +6,7 @@ import numpy as np
 from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path
-from std_msgs.msg import String
+from f110_msgs.msg import DriveState as DriveStateMsg
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point, PoseStamped
@@ -59,7 +59,7 @@ class ControllerManager(Node):
         # 3. Pubs & Subs
         self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 10)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
-        self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
+        self.state_sub = self.create_subscription(DriveStateMsg, '/state', self.state_callback, 10)
 
         self.get_logger().info("Pure Pursuit Node Started")
         self.viz_pub = self.create_publisher(Marker, '/waypoint_markers', 10)
@@ -71,9 +71,9 @@ class ControllerManager(Node):
 
     def state_callback(self, msg):
         try:
-            new_state = DriveState(msg.data)
+            new_state = DriveState(msg.state)
         except ValueError:
-            self.get_logger().warn(f"Unknown state received: {msg.data}")
+            self.get_logger().warn(f"Unknown state received: {msg.state}")
             return
 
         if new_state != self.current_state:

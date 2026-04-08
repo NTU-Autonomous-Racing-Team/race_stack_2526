@@ -4,7 +4,7 @@ from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
-from std_msgs.msg import String
+from f110_msgs.msg import DriveState as DriveStateMsg
 from state_machine.drive_state import DriveState
 
 class GapFinderNode(Node):
@@ -20,7 +20,7 @@ class GapFinderNode(Node):
 
         # TODO: Subscribe to LIDAR
         self.subscription = self.create_subscription(LaserScan,lidarscan_topic,self.lidar_callback,10)
-        self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
+        self.state_sub = self.create_subscription(DriveStateMsg, '/state', self.state_callback, 10)
         # TODO: Publish to drive
         self.publisher = self.create_publisher(AckermannDriveStamped,drive_topic,10)
         self.current_state = DriveState.GB_TRACK
@@ -40,9 +40,9 @@ class GapFinderNode(Node):
 
     def state_callback(self, msg):
         try:
-            self.current_state = DriveState(msg.data)
+            self.current_state = DriveState(msg.state)
         except ValueError:
-            self.get_logger().warn(f"Unknown state received: {msg.data}")
+            self.get_logger().warn(f"Unknown state received: {msg.state}")
 
     def preprocess_lidar(self, ranges):
         """ Preprocess the LiDAR scan array. Expert implementation includes:

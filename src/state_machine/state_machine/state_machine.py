@@ -2,8 +2,9 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
-from std_msgs.msg import String, Float32MultiArray
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32MultiArray
+from f110_msgs.msg import DriveState as DriveStateMsg
 from rclpy.qos import qos_profile_sensor_data
 from state_machine.drive_state import DriveState
 
@@ -12,8 +13,8 @@ class StateMachine(Node):
         super().__init__('state_machine')
         self.current_state = DriveState.GB_TRACK
 
-        # Topic publishing flattened Frenet obstacle points: [s0, d0, s1, d1, ...].
-        self.declare_parameter('obs_topic', '/obs_wpts')
+        # Topic publishing flattened tracked obstacles from detect.py.
+        self.declare_parameter('obs_topic', '/tracked_obstacles')
         # Lateral distance threshold (meters) below which FTG is activated.
         self.declare_parameter('safety_lateral_distance', 0.5)
         # Longitudinal trigger window in Frenet s (meters) around the car.
@@ -34,6 +35,7 @@ class StateMachine(Node):
         self.scan_trigger_distance = float(self.get_parameter('scan_trigger_distance').value)
         self.scan_clear_distance = float(self.get_parameter('scan_clear_distance').value)
         self.last_obs_msg_time = None
+        self._warned_no_obs = False
 
         self.obs_sub = self.create_subscription(
             Float32MultiArray,
@@ -47,20 +49,23 @@ class StateMachine(Node):
             self.scan_callback,
             qos_profile_sensor_data,
         )
-        self.state_pub = self.create_publisher(String, '/state', 10)
+        self.state_pub = self.create_publisher(DriveStateMsg, '/state', 10)
 
         self.get_logger().info(
             "State machine started (obs_topic=%s, safety_lateral_distance=%.2f, trigger_distance=%.2f)"
             % (self.obs_topic, self.safety_lateral_distance, self.trigger_distance)
         )
+        self.create_timer(1.0, self.monitor_obs_topic)
         self.publish_state()
 
     def _now_sec(self):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def publish_state(self):
-        state_msg = String()
-        state_msg.data = self.current_state.value
+        state_msg = DriveStateMsg()
+        state_msg.header.stamp = self.get_clock().now().to_msg()
+        state_msg.header.frame_id = 'state_machine'
+        state_msg.state = self.current_state.value
         self.state_pub.publish(state_msg)
 
     def parse_obs_wpts(self, msg):
@@ -68,8 +73,16 @@ class StateMachine(Node):
         if raw.size == 0:
             return np.empty((0, 2), dtype=float)
 
+        # detect.py publishes [s, d, vs, vd, size_s, size_d, id] per obstacle.
+        if raw.size % 7 == 0:
+            reshaped = raw.reshape((-1, 7))
+            obs = reshaped[:, :2]
+            finite_mask = np.isfinite(obs).all(axis=1)
+            return obs[finite_mask]
+
+        # Fallback: also accept legacy [s0, d0, s1, d1, ...] payloads.
         if raw.size % 2 != 0:
-            self.get_logger().warn('obs_wpts payload length is not even, dropping last value')
+            self.get_logger().warn('tracked_obstacles payload length is invalid, dropping last value')
             raw = raw[:-1]
 
         obs = raw.reshape((-1, 2))
@@ -91,6 +104,10 @@ class StateMachine(Node):
 
     def obs_callback(self, msg):
         self.last_obs_msg_time = self._now_sec()
+        if self._warned_no_obs:
+            self.get_logger().info(f"Obstacle stream active on {self.obs_topic}")
+            self._warned_no_obs = False
+
         obs_wpts = self.parse_obs_wpts(msg)
         closest = self.get_closest_obstacle(obs_wpts)
 
@@ -146,6 +163,16 @@ class StateMachine(Node):
             )
             self.current_state = new_state
             self.publish_state()
+
+    def monitor_obs_topic(self):
+        if self.last_obs_msg_time is not None:
+            return
+        if not self._warned_no_obs:
+            self.get_logger().warn(
+                f"No obstacle messages received on {self.obs_topic}. "
+                "Make sure perception/detect is running."
+            )
+            self._warned_no_obs = True
 
 def main(args=None):
     rclpy.init(args=args)

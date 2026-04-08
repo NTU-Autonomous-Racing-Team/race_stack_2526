@@ -8,6 +8,7 @@
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
+  <depend>f110_msgs</depend>
   <exec_depend>state_machine</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

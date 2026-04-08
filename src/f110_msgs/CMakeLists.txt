@@ -29,6 +29,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CarState.msg"
   "msg/CarStateStamped.msg"
+  "msg/DriveState.msg"
   "msg/GapData.msg"
   "msg/LapData.msg"
   "msg/OTWpntArray.msg"

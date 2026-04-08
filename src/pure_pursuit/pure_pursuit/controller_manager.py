@@ -5,10 +5,11 @@ from rclpy.node import Node
 import numpy as np
 from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
+from nav_msgs.msg import Path
 from std_msgs.msg import String
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker
-from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point, PoseStamped
 from pure_pursuit.pure_pursuit_logic import PurePursuitLogic
 from state_machine.drive_state import DriveState
 
@@ -31,6 +32,7 @@ class ControllerManager(Node):
         self.declare_parameter("steering_limit", 25.0) # Degrees
         self.declare_parameter("velocity_percentage", 0.6)
         self.declare_parameter("wheelbase", 0.33)
+        self.declare_parameter("local_waypoints_window", 100)
 
         self.path = self.get_parameter("waypoints_path").value
         self.odom_topic = self.get_parameter("odom_topic").value
@@ -42,6 +44,7 @@ class ControllerManager(Node):
         self.steer_limit = np.radians(self.get_parameter("steering_limit").value)
         self.vel_percent = self.get_parameter("velocity_percentage").value
         self.wheelbase = self.get_parameter("wheelbase").value
+        self.local_waypoints_window = int(self.get_parameter("local_waypoints_window").value)
 
         # 2. Initialize Logic & Data
         if not os.path.exists(self.path):
@@ -61,6 +64,7 @@ class ControllerManager(Node):
         self.get_logger().info("Pure Pursuit Node Started")
         self.viz_pub = self.create_publisher(Marker, '/waypoint_markers', 10)
         self.path_viz_pub = self.create_publisher(Marker, '/full_track_path', 10)
+        self.local_waypoints_pub = self.create_publisher(Path, '/local_waypoints', 10)
         # Trigger the path visualization once at the start
         # (Wait a tiny bit for RViz to connect)
         self.create_timer(1.0, self.publish_static_path)
@@ -110,6 +114,7 @@ class ControllerManager(Node):
             return
 
         self.visualize_lookahead_point(self.waypoints[target_idx])
+        self.publish_local_waypoints(window_size=self.local_waypoints_window)
         steer = self.pure_pursuit_logic.calculate_steering(target_pt_car, actual_la, self.kp)
         target_vel = self.waypoints[target_idx, 2] * self.vel_percent
         
@@ -189,6 +194,33 @@ class ControllerManager(Node):
             marker.points.append(p_start)
 
         self.path_viz_pub.publish(marker)
+
+    def publish_local_waypoints(self, window_size=100):
+        """
+        Publishes the rolling waypoint window used by pure pursuit as nav_msgs/Path.
+        """
+        num_waypoints = len(self.waypoints)
+        if num_waypoints == 0:
+            return
+
+        window_size = int(max(1, min(window_size, num_waypoints)))
+        start = int(self.pure_pursuit_logic.current_idx)
+
+        path_msg = Path()
+        path_msg.header.frame_id = "map"
+        path_msg.header.stamp = self.get_clock().now().to_msg()
+
+        for i in range(window_size):
+            idx = (start + i) % num_waypoints
+            pose = PoseStamped()
+            pose.header = path_msg.header
+            pose.pose.position.x = float(self.waypoints[idx][0])
+            pose.pose.position.y = float(self.waypoints[idx][1])
+            pose.pose.position.z = 0.0
+            pose.pose.orientation.w = 1.0
+            path_msg.poses.append(pose)
+
+        self.local_waypoints_pub.publish(path_msg)
 
 def main(args=None):
     rclpy.init(args=args)

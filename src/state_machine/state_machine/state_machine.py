@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
-from std_msgs.msg import String, Float32MultiArray
+from std_msgs.msg import String, Float32MultiArray, Bool
 from sensor_msgs.msg import LaserScan
 from rclpy.qos import qos_profile_sensor_data
 from state_machine.drive_state import DriveState
@@ -10,10 +10,15 @@ from state_machine.drive_state import DriveState
 class StateMachine(Node):
     def __init__(self):
         super().__init__('state_machine')
-        self.current_state = DriveState.GB_TRACK
+        self.current_state = DriveState.TRAILING
+
+        self.opponent_detected = False
+        self.overtake_feasible = True
+        self.declare_parameter('feasibility_topic', '/planner/overtake_feasible')
+        self.feasibility_topic = self.get_parameter('feasibility_topic').value
 
         # Topic publishing flattened Frenet obstacle points: [s0, d0, s1, d1, ...].
-        self.declare_parameter('obs_topic', '/obs_wpts')
+        self.declare_parameter('obs_topic', '/tracked_obstacles')
         # Lateral distance threshold (meters) below which FTG is activated.
         self.declare_parameter('safety_lateral_distance', 0.5)
         # Longitudinal trigger window in Frenet s (meters) around the car.
@@ -47,6 +52,14 @@ class StateMachine(Node):
             self.scan_callback,
             qos_profile_sensor_data,
         )
+
+        self.feasibility_sub = self.create_subscription(
+            Bool, 
+            self.feasibility_topic, 
+            self.feasibility_callback, 
+            10
+        )
+
         self.state_pub = self.create_publisher(String, '/state', 10)
 
         self.get_logger().info(
@@ -63,16 +76,41 @@ class StateMachine(Node):
         state_msg.data = self.current_state.value
         self.state_pub.publish(state_msg)
 
+    def feasibility_callback(self, msg: Bool):
+        """ Updates the state machine with the local planner's feasibility assessment """
+        self.overtake_feasible = msg.data
+
     def parse_obs_wpts(self, msg):
+        # raw = np.array(msg.data, dtype=float)
+        # if raw.size == 0:
+        #     return np.empty((0, 2), dtype=float)
+# 
+        # if raw.size % 2 != 0:
+        #     self.get_logger().warn('obs_wpts payload length is not even, dropping last value')
+        #     raw = raw[:-1]
+# 
+        # obs = raw.reshape((-1, 2))
+        # finite_mask = np.isfinite(obs).all(axis=1)
+        # return obs[finite_mask]
+
         raw = np.array(msg.data, dtype=float)
+        
+        # Expecting 7 values per obstacle from Detect node: 
+        # [s, d, vs, vd, size_s, size_d, id]
+        NUM_FEATURES = 7
+        
         if raw.size == 0:
-            return np.empty((0, 2), dtype=float)
+            return np.empty((0, NUM_FEATURES), dtype=float)
 
-        if raw.size % 2 != 0:
-            self.get_logger().warn('obs_wpts payload length is not even, dropping last value')
-            raw = raw[:-1]
+        if raw.size % NUM_FEATURES != 0:
+            self.get_logger().warn(f'obs_wpts payload length {raw.size} is not a multiple of {NUM_FEATURES}. Truncating...')
+            valid_length = (raw.size // NUM_FEATURES) * NUM_FEATURES
+            raw = raw[:valid_length]
 
-        obs = raw.reshape((-1, 2))
+        # Reshape into rows of 7 columns
+        obs = raw.reshape((-1, NUM_FEATURES))
+        
+        # Filter out any rows that have infinity or NaN values
         finite_mask = np.isfinite(obs).all(axis=1)
         return obs[finite_mask]
 
@@ -104,10 +142,25 @@ class StateMachine(Node):
             within_trigger = abs(obs_s) < self.trigger_distance
 
             if self.current_state == DriveState.GB_TRACK:
-                # Trigger FTG when closest obstacle is laterally too close.
-                if lateral_close:
+
+            ### TODO: SWAP FTGONLY TO OVERTAKE ### 
+
+            # Trigger dynamic state when closest obstacle is laterally too close.
+                if lateral_close and within_trigger:
+                    if self.overtake_feasible:
+                        new_state = DriveState.FTGONLY
+                    else:
+                        new_state = DriveState.TRAILING
+                # Return to GB when either obstacle is not near in s or not near in d.
+            elif self.current_state == DriveState.TRAILING:
+                # If obstacle clears, return to racing line
+                if (not within_trigger) or (not lateral_close):
+                    new_state = DriveState.GB_TRACK
+                # If we are trailing and overtake becomes feasible, switch to FTGONLY
+                elif self.overtake_feasible:
                     new_state = DriveState.FTGONLY
-            else:
+
+            elif self.current_state == DriveState.FTGONLY:
                 # Return to GB when either obstacle is not near in s or not near in d.
                 if (not within_trigger) or (not lateral_close):
                     new_state = DriveState.GB_TRACK
@@ -126,7 +179,6 @@ class StateMachine(Node):
         now = self._now_sec()
         if self.last_obs_msg_time is not None and (now - self.last_obs_msg_time) <= self.obs_timeout_sec:
             return
-
         ranges = np.array(msg.ranges, dtype=float)
         valid = ranges[np.isfinite(ranges) & (ranges > 0.05)]
         if valid.size == 0:
@@ -134,10 +186,21 @@ class StateMachine(Node):
 
         min_dist = float(np.min(valid))
         new_state = self.current_state
-        if self.current_state == DriveState.GB_TRACK and min_dist < self.scan_trigger_distance:
-            new_state = DriveState.FTGONLY
-        elif self.current_state == DriveState.FTGONLY and min_dist > self.scan_clear_distance:
-            new_state = DriveState.GB_TRACK
+
+        if min_dist < self.scan_trigger_distance:
+            if True:
+                new_state = DriveState.FTGONLY
+            else:
+                new_state = DriveState.TRAILING
+        elif self.current_state == DriveState.TRAILING:
+            if min_dist > self.scan_clear_distance:
+                new_state = DriveState.GB_TRACK
+            elif self.overtake_feasible:
+                new_state = DriveState.FTGONLY
+
+        elif self.current_state == DriveState.FTGONLY: 
+            if min_dist > self.scan_clear_distance:
+                new_state = DriveState.GB_TRACK
 
         if new_state != self.current_state:
             self.get_logger().info(

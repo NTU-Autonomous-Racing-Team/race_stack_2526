@@ -1,0 +1,15 @@
+<launch>
+    <arg name="param_file" default="$(find-pkg-share perception)/misc/opponent_tracker_params.yaml" description="Filepath to the opponent tracking/detection config file" />
+    <node pkg="perception" name="detect" exec="detect" output="log"
+        args="--ros-args --log-level info">
+        <param from="$(var param_file)" />
+        <param name="/measure" value="false" />
+        <param name="/from_bag" value="false" />
+    </node>
+    <node pkg="perception" name="tracking" exec="tracking" output="log"
+        args="--ros-args --log-level warn">
+        <param from="$(var param_file)" />
+        <param name="/measure" value="false" />
+        <param name="/from_bag" value="false" />
+    </node>
+</launch>

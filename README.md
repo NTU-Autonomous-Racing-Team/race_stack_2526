@@ -1,20 +1,42 @@
-### Cloning the repository
+Something to take note: 
 
-Execute the following command to clone the repository:
-```bash
-git clone --recursive https://github.com/NTU-Autonomous-Racing-Team/race_stack_2526
+Changed/ Added: 
+```
+controller_manager, controller_manager.yaml, pure_pursuit_logic_modified, ftg_logic, opp_controller
+
+state_machine.py, drive_state.py, state_machine launchfile
+
+launch_master
 ```
 
-### Running the Race Stack
+For new maps: copy korea.png and korea.yaml into f1tenth_gym_ros/maps, and change sim.yaml
 
-First, execute the following command to start the simulator:
+csv file has been pushed tgt  
+ --note: korea_mintime_detailed contains # s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2, it might help you in some way  
+         korea_mintime_sparse contains x,y,v  
+         korea.csv is the wpts of the track's centerline and track width
 
-```bash
-bash simulate.sh
-```
+**launch_master**
+1. a parent launch file to run everything in the future
+2. e.g. act as a parent launch file to run other node's launch file
 
-Then, open another terminal to execute the following code to get the car moving:
+**Controller Manager.py**
+1. Only change the parameters in controller_manager.yaml, and pass it to the node via launch file (check statemachine launch.py)
+2. set parameter self.reverse_waypoints to True to run your car in anticlockwise direction as in competition, we might race in either direction during head to head race. Should ensure the calculation (especially the part using frenet) works fine in both direction
+3. (for simulation) It will spawn 2 cars upon starting, with both running pure pursuit, can adjust the car initial pose by changing the index @ line 123 or 150&151
+4. Added Trailing: follow the front car when overtake is not feasible
+5. Added safe transition logic: Ensure it navigate safely to the raceline when switch from other states to GB_TRACK as pp is blind 
 
-```bash
-bash run.sh
-```
+**pure_pursuit**
+1. the modified version use ackermann kinematics model to calculate steering angle and use the intersection of lookahead circle and global wpts as the target wpts
+both version work well in sim, but I am thinking that a proper kinematics model will be more suitable to real world as compared to using proportional gain. 
+ -- Should test out both version ltr on
+
+**state_machine**
+1. wired detect.py into it (local planner not yet)
+2. integrated trailng logic into it (still have some TODO to complete)
+
+Both trailing and safe transition is working well when tested alone, but haven't verify and would need more testing after integrated into state machine, as it subjected to the robustness of decision logic of state machine and also missing some input from local planner
+
+**state_estimation**
+1. working in progress, ignore it for now

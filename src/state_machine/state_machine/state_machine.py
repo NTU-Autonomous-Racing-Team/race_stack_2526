@@ -5,7 +5,7 @@ import numpy as np
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32MultiArray
 from f110_msgs.msg import DriveState as DriveStateMsg
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, qos_profile_sensor_data
 from state_machine.drive_state import DriveState
 
 class StateMachine(Node):
@@ -16,11 +16,15 @@ class StateMachine(Node):
         # Topic publishing flattened tracked obstacles from detect.py.
         self.declare_parameter('obs_topic', '/tracked_obstacles')
         # Lateral distance threshold (meters) below which FTG is activated.
-        self.declare_parameter('safety_lateral_distance', 0.5)
+        self.declare_parameter('safety_lateral_distance', 1.5)
         # Longitudinal trigger window in Frenet s (meters) around the car.
         self.declare_parameter('trigger_distance', 3.0)
         # Maximum age (seconds) of obs_topic data before lidar fallback is used.
-        self.declare_parameter('obs_timeout_sec', 0.5)
+        self.declare_parameter('obs_timeout_sec', 1.0)
+        # QoS reliability for obs_topic: reliable|best_effort.
+        self.declare_parameter('obs_qos_reliability', 'reliable')
+        # QoS queue depth for obs_topic.
+        self.declare_parameter('obs_qos_depth', 10)
         # Lidar topic used only as fallback when Frenet obstacle data is stale.
         self.declare_parameter('scan_topic', '/scan')
         # Fallback trigger distance (meters): closer than this enters FTG.
@@ -31,17 +35,31 @@ class StateMachine(Node):
         self.safety_lateral_distance = float(self.get_parameter('safety_lateral_distance').value)
         self.trigger_distance = float(self.get_parameter('trigger_distance').value)
         self.obs_timeout_sec = float(self.get_parameter('obs_timeout_sec').value)
+        obs_qos_reliability = str(self.get_parameter('obs_qos_reliability').value).strip().lower()
+        obs_qos_depth = int(self.get_parameter('obs_qos_depth').value)
         self.scan_topic = self.get_parameter('scan_topic').value
         self.scan_trigger_distance = float(self.get_parameter('scan_trigger_distance').value)
         self.scan_clear_distance = float(self.get_parameter('scan_clear_distance').value)
         self.last_obs_msg_time = None
         self._warned_no_obs = False
+        self._warned_stale_obs = False
+
+        if obs_qos_reliability == 'best_effort':
+            obs_reliability = QoSReliabilityPolicy.BEST_EFFORT
+        else:
+            obs_reliability = QoSReliabilityPolicy.RELIABLE
+            if obs_qos_reliability != 'reliable':
+                self.get_logger().warn(
+                    f"Unsupported obs_qos_reliability='{obs_qos_reliability}', defaulting to reliable"
+                )
+
+        obs_qos_profile = QoSProfile(depth=max(1, obs_qos_depth), reliability=obs_reliability)
 
         self.obs_sub = self.create_subscription(
             Float32MultiArray,
             self.obs_topic,
             self.obs_callback,
-            qos_profile_sensor_data,
+            obs_qos_profile,
         )
         self.scan_sub = self.create_subscription(
             LaserScan,
@@ -52,8 +70,15 @@ class StateMachine(Node):
         self.state_pub = self.create_publisher(DriveStateMsg, '/state', 10)
 
         self.get_logger().info(
-            "State machine started (obs_topic=%s, safety_lateral_distance=%.2f, trigger_distance=%.2f)"
-            % (self.obs_topic, self.safety_lateral_distance, self.trigger_distance)
+            "State machine started (obs_topic=%s, safety_lateral_distance=%.2f, trigger_distance=%.2f, obs_timeout_sec=%.2f, obs_qos=%s/%d)"
+            % (
+                self.obs_topic,
+                self.safety_lateral_distance,
+                self.trigger_distance,
+                self.obs_timeout_sec,
+                'reliable' if obs_reliability == QoSReliabilityPolicy.RELIABLE else 'best_effort',
+                max(1, obs_qos_depth),
+            )
         )
         self.create_timer(1.0, self.monitor_obs_topic)
         self.publish_state()
@@ -104,6 +129,7 @@ class StateMachine(Node):
 
     def obs_callback(self, msg):
         self.last_obs_msg_time = self._now_sec()
+        self._warned_stale_obs = False
         if self._warned_no_obs:
             self.get_logger().info(f"Obstacle stream active on {self.obs_topic}")
             self._warned_no_obs = False
@@ -143,6 +169,13 @@ class StateMachine(Node):
         now = self._now_sec()
         if self.last_obs_msg_time is not None and (now - self.last_obs_msg_time) <= self.obs_timeout_sec:
             return
+
+        if self.last_obs_msg_time is not None and not self._warned_stale_obs:
+            age = now - self.last_obs_msg_time
+            self.get_logger().warn(
+                f"Obstacle data stale for {age:.2f}s (> {self.obs_timeout_sec:.2f}s). Using lidar fallback."
+            )
+            self._warned_stale_obs = True
 
         ranges = np.array(msg.ranges, dtype=float)
         valid = ranges[np.isfinite(ranges) & (ranges > 0.05)]

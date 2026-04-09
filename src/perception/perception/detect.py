@@ -11,8 +11,10 @@ from geometry_msgs.msg import Point
  
 import numpy as np
 import time
+import os
 from sklearn.cluster import DBSCAN
 from scipy.spatial.transform import Rotation
+from ament_index_python.packages import get_package_share_directory
  
 from frenet_conversion import FrenetConverter
  
@@ -55,7 +57,20 @@ class Detect(Node):
         # -----------------------------
         # LOAD TRACK CSV
         # -----------------------------
-        self.csv_path = "/home/belroy/race_stack_2526/src/pure_pursuit/racelines/arc.csv"
+        try:
+            # Use ROS2 package path lookup for portability
+            pure_pursuit_share = get_package_share_directory('pure_pursuit')
+            self.csv_path = os.path.join(pure_pursuit_share, 'racelines', 'arc.csv')
+            if not os.path.exists(self.csv_path):
+                # Fallback: try source directory
+                self.csv_path = os.path.join(os.path.dirname(__file__), '../../pure_pursuit/racelines/arc.csv')
+            if not os.path.exists(self.csv_path):
+                raise FileNotFoundError(f"Raceline CSV not found at {self.csv_path}")
+            self.get_logger().info(f"Loading raceline from: {self.csv_path}")
+        except Exception as e:
+            self.get_logger().error(f"Failed to load raceline path: {e}")
+            raise
+            
         data = np.loadtxt(self.csv_path, delimiter=",")
         # --- TEMPORARY DEBUG ---
         data = np.loadtxt(self.csv_path, delimiter=",")
@@ -84,16 +99,26 @@ class Detect(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
  
         # -----------------------------
-        # PARAMETERS
+        # ROS PARAMETERS (tunable)
         # -----------------------------
-        self.eps = 0.2
-        self.min_samples = 3
-        self.max_range = 5.0
-        self.track_half_width = 1.8
-        self.match_threshold = 0.5
-        self.max_age = 0.5
-        self.max_obs_size = 0.5   # max physical size in metres (car ~0.3m wide)
-        self.min_obs_size = 5    # min number of points to be a valid cluster
+        self.declare_parameter('eps', 0.15)  # DBSCAN clustering distance
+        self.declare_parameter('min_samples', 2)  # DBSCAN min cluster size
+        self.declare_parameter('max_range', 5.0)
+        self.declare_parameter('track_half_width', 1.8)
+        self.declare_parameter('match_threshold', 0.5)
+        self.declare_parameter('max_age', 1.0)  # Increased from 0.5 to keep tracks longer
+        self.declare_parameter('max_obs_size', 0.5)
+        self.declare_parameter('min_obs_size', 4)  # Lowered from 5 for faster detection
+        
+        # Get parameter values
+        self.eps = float(self.get_parameter('eps').value)
+        self.min_samples = int(self.get_parameter('min_samples').value)
+        self.max_range = float(self.get_parameter('max_range').value)
+        self.track_half_width = float(self.get_parameter('track_half_width').value)
+        self.match_threshold = float(self.get_parameter('match_threshold').value)
+        self.max_age = float(self.get_parameter('max_age').value)
+        self.max_obs_size = float(self.get_parameter('max_obs_size').value)
+        self.min_obs_size = int(self.get_parameter('min_obs_size').value)
  
         # -----------------------------
         # TRACKING STATE
@@ -292,8 +317,6 @@ class Detect(Node):
     # MAIN CALLBACK
     # -----------------------------
     def scan_cb(self, scan):
-        start_time = time.perf_counter()
- 
         try:
             transform = self.tf_buffer.lookup_transform(
                 'map',
@@ -314,22 +337,15 @@ class Detect(Node):
         angles_full = np.linspace(scan.angle_min, scan.angle_max, len(ranges_raw))
         angles = angles_full[valid_mask]
  
-        self.get_logger().info(f"Valid scan points: {len(ranges)} / {len(ranges_raw)}")
+        # self.get_logger().info(f"Valid scan points: {len(ranges)} / {len(ranges_raw)}")
  
         x_local = ranges * np.cos(angles)
         y_local = ranges * np.sin(angles)
         points_local = np.vstack((x_local, y_local)).T
  
         T = from_vector3_msg(transform.transform.translation)
-        print(f"Ego pos: x={T[0]:.3f}, y={T[1]:.3f}")
         R = from_quat_msg(transform.transform.rotation).as_matrix()
         points_global = (R[:2, :2] @ points_local.T).T + T[:2]
-
-        # DEBUG: check coordinate alignment
-        print("Sample global point:", points_global[0])
-        print("Raceline first point:",
-                self.converter.waypoints_x[0],
-                self.converter.waypoints_y[0])
  
         # -----------------------------
         # DBSCAN CLUSTERING
@@ -344,7 +360,7 @@ class Detect(Node):
             mask = labels == label
             clusters.append(points_global[mask])
  
-        self.get_logger().info(f"Clusters detected: {len(clusters)}")
+        # self.get_logger().info(f"Clusters detected: {len(clusters)}")
  
         # -----------------------------
         # RECTANGLE FITTING + FILTERING
@@ -354,7 +370,7 @@ class Detect(Node):
  
             # Min points filter
             if len(xy_points) < self.min_obs_size:
-                self.get_logger().info(f'  -> REJECTED: too few points ({len(xy_points)})')
+                # self.get_logger().info(f'  -> REJECTED: too few points ({len(xy_points)})')
                 continue
  
             # Rectangle fit in Cartesian space
@@ -362,7 +378,7 @@ class Detect(Node):
  
             # Physical size filter — reject walls and large objects
             if size > self.max_obs_size:
-                self.get_logger().info(f'  -> REJECTED by size filter (size={size:.2f}m)')
+                # self.get_logger().info(f'  -> REJECTED by size filter (size={size:.2f}m)')
                 continue
  
             # Convert fitted center to Frenet
@@ -370,20 +386,20 @@ class Detect(Node):
             s_center = float(s_arr[0])
             d_center = float(d_arr[0])
  
-            self.get_logger().info(
-                f'cluster: pts={len(xy_points)} size={size:.2f}m '
-                f's={s_center:.2f} d={d_center:.2f}')
+            # self.get_logger().info(
+            #     f'cluster: pts={len(xy_points)} size={size:.2f}m '
+            #     f's={s_center:.2f} d={d_center:.2f}')
  
             # Track boundary filter
             if abs(d_center) > self.track_half_width:
-                self.get_logger().info(
-                    f'  -> REJECTED by track_half_width (d={d_center:.2f})')
+                # self.get_logger().info(
+                #     f'  -> REJECTED by track_half_width (d={d_center:.2f})')
                 continue
  
-            self.get_logger().info(f'  -> ACCEPTED as detection')
+            # self.get_logger().info(f'  -> ACCEPTED as detection')
             detections.append((s_center, d_center, size, size))
  
-        self.get_logger().info(f"Valid obstacles: {len(detections)}")
+        # self.get_logger().info(f"Valid obstacles: {len(detections)}")
  
         # -----------------------------
         # TRACKING
@@ -429,7 +445,7 @@ class Detect(Node):
         dead_ids = self.active_marker_ids - new_ids
         self.active_marker_ids = new_ids
  
-        self.get_logger().info(f"Tracking objects: {len(self.tracked)}")
+        # self.get_logger().info(f"Tracking objects: {len(self.tracked)}")
  
         # -----------------------------
         # PUBLISH
@@ -443,9 +459,6 @@ class Detect(Node):
  
         self.publish_obstacle_markers(dead_ids)
  
-        end_time = time.perf_counter()
-        latency = (end_time - start_time) * 1000
-        self.get_logger().info(f"Loop latency: {latency:.2f} ms")
  
  
 # -----------------------------

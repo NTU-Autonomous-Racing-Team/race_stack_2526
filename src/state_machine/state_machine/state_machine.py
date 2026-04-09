@@ -11,7 +11,7 @@ from state_machine.drive_state import DriveState
 class StateMachine(Node):
     def __init__(self):
         super().__init__('state_machine')
-        self.current_state = DriveState.TRAILING
+        self.current_state = DriveState.GB_TRACK
 
         self.opponent_detected = False
         self.overtake_feasible = True
@@ -25,13 +25,15 @@ class StateMachine(Node):
         # Longitudinal trigger window in Frenet s (meters) around the car.
         self.declare_parameter('trigger_distance', 3.0)
         # Maximum age (seconds) of obs_topic data before lidar fallback is used.
-        self.declare_parameter('obs_timeout_sec', 0.5)
+        self.declare_parameter('obs_timeout_sec', 0.1)
         # Lidar topic used only as fallback when Frenet obstacle data is stale.
         self.declare_parameter('scan_topic', '/scan')
         # Fallback trigger distance (meters): closer than this enters FTG.
         self.declare_parameter('scan_trigger_distance', 0.7)
         # Fallback clear distance (meters): farther than this returns to GB_TRACK.
         self.declare_parameter('scan_clear_distance', 1.2)
+        # Keep lidar fallback disabled unless obstacle waypoints are unavailable by design.
+        self.declare_parameter('enable_lidar_fallback', False)
         # RViz marker topic for live state text.
         self.declare_parameter('state_marker_topic', '/state_marker')
         # TF frame where state text is displayed.
@@ -43,6 +45,7 @@ class StateMachine(Node):
         self.scan_topic = self.get_parameter('scan_topic').value
         self.scan_trigger_distance = float(self.get_parameter('scan_trigger_distance').value)
         self.scan_clear_distance = float(self.get_parameter('scan_clear_distance').value)
+        self.enable_lidar_fallback = bool(self.get_parameter('enable_lidar_fallback').value)
         self.state_marker_topic = self.get_parameter('state_marker_topic').value
         self.state_marker_frame = self.get_parameter('state_marker_frame').value
         self.last_obs_msg_time = None
@@ -206,16 +209,13 @@ class StateMachine(Node):
                 if (not within_trigger) or (not lateral_close):
                     new_state = DriveState.GB_TRACK
 
-            if new_state != self.current_state:
-                self.get_logger().info(
-                    f"State switch {self.current_state.value} -> {new_state.value} "
-                    f"(closest_s={obs_s:.2f}, closest_d={obs_d:.2f}, within_trigger={within_trigger})"
-                )
-
         self.current_state = new_state
         self.publish_state()
 
     def scan_callback(self, msg):
+        if not self.enable_lidar_fallback:
+            return
+
         # Use lidar as a fallback only when obstacle Frenet data is stale/missing.
         now = self._now_sec()
         if self.last_obs_msg_time is not None and (now - self.last_obs_msg_time) <= self.obs_timeout_sec:
@@ -244,10 +244,6 @@ class StateMachine(Node):
                 new_state = DriveState.GB_TRACK
 
         if new_state != self.current_state:
-            self.get_logger().info(
-                f"State switch {self.current_state.value} -> {new_state.value} "
-                f"(lidar fallback, min_dist={min_dist:.2f})"
-            )
             self.current_state = new_state
             self.publish_state()
 

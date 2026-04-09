@@ -163,13 +163,11 @@ class ControllerManager(Node):
             self.get_logger().warn(f"Received unknown state: {msg.data}")
             return
 
-        if incoming_state != self.current_state:
-            self.get_logger().info(f"--- STATE SWITCH: {self.current_state.value} -> {incoming_state.value} ---")
-            
+        if incoming_state != self.current_state:            
             # Entering GB_TRACK from another state — use FTG as bridge
             if incoming_state == DriveState.GB_TRACK and self.current_state != DriveState.GB_TRACK:
                 self.in_transition = True
-                self.get_logger().info("Transition to GB_TRACK: using FTG until on raceline")
+                # self.get_logger().info("Transition to GB_TRACK: using FTG until on raceline")
                 
             if incoming_state == DriveState.GB_TRACK:
                 self.ftg_logic.prev_steering = 0.0
@@ -254,7 +252,6 @@ class ControllerManager(Node):
         in_corridor = (xs > 0.1) & (xs < clear_dist) & (np.abs(ys) < half_width)
 
         if np.any(in_corridor):
-            self.get_logger().info("TRANSITION DENIED: Obstacle in forward corridor!", throttle_duration_sec=0.5)
             return False
 
         return True
@@ -268,11 +265,6 @@ class ControllerManager(Node):
         d = float(frenet[1][0])  # lateral offset from raceline
 
         d_ok = abs(d) < self.get_parameter("transition_d_threshold").value
-
-        self.get_logger().info(
-            f"TRANSITION CHECK: d={d:.3f}m d_ok={d_ok}",
-            throttle_duration_sec=0.5
-        )
         return d_ok
 
     ### --- END OF SAFE TRANSITION LOGIC --- ###
@@ -346,7 +338,6 @@ class ControllerManager(Node):
         if not path_clear:
             # Obstacle nearby — plain FTG, avoid first
             self.consecutive_valid_frames = 0
-            self.get_logger().info("TRANSITION: obstacle detected, plain FTG", throttle_duration_sec=0.5)
             self.execute_ftg_logic()
             return
         # Path is clear — always use goal-directed FTG to pull toward raceline
@@ -385,9 +376,6 @@ class ControllerManager(Node):
         self.publish_drive(steer, speed)
         if on_raceline:
             self.consecutive_valid_frames += 1
-            self.get_logger().info(
-                f"TRANSITION: valid frame {self.consecutive_valid_frames}/{self.required_frames}"
-            )
             # Ensure the car stays on the raceline long enough before switching to pure pursuit
             if self.consecutive_valid_frames >= self.required_frames:
                 self.in_transition = False

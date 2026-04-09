@@ -4,6 +4,7 @@ from rclpy.node import Node
 import numpy as np
 from std_msgs.msg import String, Float32MultiArray, Bool
 from sensor_msgs.msg import LaserScan
+from visualization_msgs.msg import Marker
 from rclpy.qos import qos_profile_sensor_data
 from state_machine.drive_state import DriveState
 
@@ -31,6 +32,10 @@ class StateMachine(Node):
         self.declare_parameter('scan_trigger_distance', 0.7)
         # Fallback clear distance (meters): farther than this returns to GB_TRACK.
         self.declare_parameter('scan_clear_distance', 1.2)
+        # RViz marker topic for live state text.
+        self.declare_parameter('state_marker_topic', '/state_marker')
+        # TF frame where state text is displayed.
+        self.declare_parameter('state_marker_frame', 'ego_racecar/base_link')
         self.obs_topic = self.get_parameter('obs_topic').value
         self.safety_lateral_distance = float(self.get_parameter('safety_lateral_distance').value)
         self.trigger_distance = float(self.get_parameter('trigger_distance').value)
@@ -38,6 +43,8 @@ class StateMachine(Node):
         self.scan_topic = self.get_parameter('scan_topic').value
         self.scan_trigger_distance = float(self.get_parameter('scan_trigger_distance').value)
         self.scan_clear_distance = float(self.get_parameter('scan_clear_distance').value)
+        self.state_marker_topic = self.get_parameter('state_marker_topic').value
+        self.state_marker_frame = self.get_parameter('state_marker_frame').value
         self.last_obs_msg_time = None
 
         self.obs_sub = self.create_subscription(
@@ -61,6 +68,9 @@ class StateMachine(Node):
         )
 
         self.state_pub = self.create_publisher(String, '/state', 10)
+        self.state_marker_pub = self.create_publisher(Marker, self.state_marker_topic, 10)
+        # Republish marker so it appears even if RViz starts after this node.
+        self.create_timer(0.25, self.publish_state_marker)
 
         self.get_logger().info(
             "State machine started (obs_topic=%s, safety_lateral_distance=%.2f, trigger_distance=%.2f)"
@@ -75,6 +85,37 @@ class StateMachine(Node):
         state_msg = String()
         state_msg.data = self.current_state.value
         self.state_pub.publish(state_msg)
+        self.publish_state_marker()
+
+    def _state_color(self):
+        if self.current_state == DriveState.GB_TRACK:
+            return (0.1, 0.9, 0.1)
+        if self.current_state == DriveState.TRAILING:
+            return (1.0, 0.75, 0.0)
+        if self.current_state == DriveState.FTGONLY:
+            return (1.0, 0.1, 0.1)
+        return (1.0, 1.0, 1.0)
+
+    def publish_state_marker(self):
+        marker = Marker()
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.header.frame_id = self.state_marker_frame
+        marker.ns = 'state_machine'
+        marker.id = 0
+        marker.type = Marker.TEXT_VIEW_FACING
+        marker.action = Marker.ADD
+        marker.pose.position.x = 0.0
+        marker.pose.position.y = 0.0
+        marker.pose.position.z = 1.1
+        marker.pose.orientation.w = 1.0
+        marker.scale.z = 0.45
+        marker.color.a = 1.0
+        r, g, b = self._state_color()
+        marker.color.r = r
+        marker.color.g = g
+        marker.color.b = b
+        marker.text = f"STATE: {self.current_state.value}"
+        self.state_marker_pub.publish(marker)
 
     def feasibility_callback(self, msg: Bool):
         """ Updates the state machine with the local planner's feasibility assessment """

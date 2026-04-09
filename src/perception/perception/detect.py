@@ -100,7 +100,6 @@ class Detect(Node):
         # -----------------------------
         self.tracked = []
         self.next_id = 0
-        self.active_marker_ids = set()
  
         # -----------------------------
         # RACELINE TIMER
@@ -252,19 +251,18 @@ class Detect(Node):
     # -----------------------------
     # PUBLISH MARKERS
     # -----------------------------
-    def publish_obstacle_markers(self, dead_ids=set()):
+    def publish_obstacle_markers(self, active_tracks):
         marker_array = MarkerArray()
  
-        for dead_id in dead_ids:
-            marker = Marker()
-            marker.header.frame_id = 'map'
-            marker.header.stamp = self.get_clock().now().to_msg()
-            marker.ns = 'obstacles'
-            marker.id = dead_id
-            marker.action = Marker.DELETE
-            marker_array.markers.append(marker)
+        # Clear prior obstacle markers on every cycle so RViz shows only active obstacles.
+        clear_marker = Marker()
+        clear_marker.header.frame_id = 'map'
+        clear_marker.header.stamp = self.get_clock().now().to_msg()
+        clear_marker.ns = 'obstacles'
+        clear_marker.action = Marker.DELETEALL
+        marker_array.markers.append(clear_marker)
  
-        for t in self.tracked:
+        for t in active_tracks:
             xy = self.converter.get_cartesian(t.s, t.d)
             marker = Marker()
             marker.header.frame_id = 'map'
@@ -284,6 +282,7 @@ class Detect(Node):
             marker.color.r = 1.0
             marker.color.g = 0.0
             marker.color.b = 0.0
+            marker.lifetime = Duration(seconds=0.2).to_msg()
             marker_array.markers.append(marker)
  
         self.marker_pub.publish(marker_array)
@@ -329,9 +328,6 @@ class Detect(Node):
         if points_global.shape[0] == 0:
             current_time = time.time()
             self.tracked = [t for t in self.tracked if current_time - t.last_seen < self.max_age]
-            new_ids = {t.id for t in self.tracked}
-            dead_ids = self.active_marker_ids - new_ids
-            self.active_marker_ids = new_ids
 
             msg = Float32MultiArray()
             flat = []
@@ -339,7 +335,7 @@ class Detect(Node):
                 flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
             msg.data = flat
             self.pub.publish(msg)
-            self.publish_obstacle_markers(dead_ids)
+            self.publish_obstacle_markers([])
             return
 
         # DEBUG: check coordinate alignment
@@ -442,9 +438,6 @@ class Detect(Node):
                 updated_tracks.append(new_track)
  
         self.tracked = [t for t in updated_tracks if current_time - t.last_seen < self.max_age]
-        new_ids = {t.id for t in self.tracked}
-        dead_ids = self.active_marker_ids - new_ids
-        self.active_marker_ids = new_ids
  
         #self.get_logger().info(f"Tracking objects: {len(self.tracked)}")
  
@@ -458,7 +451,7 @@ class Detect(Node):
         msg.data = flat
         self.pub.publish(msg)
  
-        self.publish_obstacle_markers(dead_ids)
+        self.publish_obstacle_markers(updated_tracks)
  
         end_time = time.perf_counter()
         latency = (end_time - start_time) * 1000

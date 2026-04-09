@@ -309,7 +309,7 @@ class Detect(Node):
         # FILTER INVALID SCAN POINTS
         # -----------------------------
         ranges_raw = np.array(scan.ranges)
-        valid_mask = (ranges_raw >= scan.range_min) & (ranges_raw <= self.max_range)
+        valid_mask = np.isfinite(ranges_raw) & (ranges_raw >= scan.range_min) & (ranges_raw <= self.max_range)
         ranges = ranges_raw[valid_mask]
         angles_full = np.linspace(scan.angle_min, scan.angle_max, len(ranges_raw))
         angles = angles_full[valid_mask]
@@ -324,6 +324,23 @@ class Detect(Node):
         #print(f"Ego pos: x={T[0]:.3f}, y={T[1]:.3f}")
         R = from_quat_msg(transform.transform.rotation).as_matrix()
         points_global = (R[:2, :2] @ points_local.T).T + T[:2]
+
+        # DBSCAN needs at least one sample; keep current non-stale tracks and skip clustering.
+        if points_global.shape[0] == 0:
+            current_time = time.time()
+            self.tracked = [t for t in self.tracked if current_time - t.last_seen < self.max_age]
+            new_ids = {t.id for t in self.tracked}
+            dead_ids = self.active_marker_ids - new_ids
+            self.active_marker_ids = new_ids
+
+            msg = Float32MultiArray()
+            flat = []
+            for t in self.tracked:
+                flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
+            msg.data = flat
+            self.pub.publish(msg)
+            self.publish_obstacle_markers(dead_ids)
+            return
 
         # DEBUG: check coordinate alignment
         #print("Sample global point:", points_global[0])

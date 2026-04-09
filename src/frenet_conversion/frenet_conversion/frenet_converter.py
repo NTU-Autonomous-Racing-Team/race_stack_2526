@@ -42,14 +42,8 @@ class FrenetConverter:
         return np.array([s, d])
 
     def get_approx_s(self, x, y) -> float:
-        """
-        Finds the s-coordinate of the given point by finding the nearest waypoint.
-        """
-        # get distance with broadcasting multiple arrays
-        lenx = len(x)
-        dist_x = x - np.tile(self.waypoints_x, (lenx, 1)).T
-        dist_y = y - np.tile(self.waypoints_y, (lenx, 1)).T
-        return np.argmin(np.linalg.norm([dist_x.T, dist_y.T], axis=0), axis=1)*self.waypoints_distance_m
+        closest_idx = self.get_closest_index(x, y)
+        return np.array(self.waypoints_s)[closest_idx]
     
     def get_frenet_velocities(self, vx, vy, theta) -> np.array:
         """
@@ -86,7 +80,8 @@ class FrenetConverter:
         lenx = len(x)
         dist_x = x - np.tile(self.waypoints_x, (lenx, 1)).T
         dist_y = y - np.tile(self.waypoints_y, (lenx, 1)).T
-        self.closest_index = np.argmin(np.linalg.norm([dist_x.T, dist_y.T], axis=0), axis=1)
+        dist = np.sqrt(dist_x**2 + dist_y**2)
+        self.closest_index = np.argmin(dist, axis=0)
         return self.closest_index
 
 
@@ -125,7 +120,8 @@ class FrenetConverter:
         tangent = np.array([dx_ds, dy_ds])
         if np.any(np.isnan(s)):
             raise ValueError("BUB FRENET CONVERTER: S is nan")
-        tangent /= np.linalg.norm(tangent, axis=0)
+        norm = np.linalg.norm(tangent, axis=0) + 1e-6
+        tangent /= norm
 
         # obtain vector from the track to the point
         x_vec = x - self.spline_x(s)

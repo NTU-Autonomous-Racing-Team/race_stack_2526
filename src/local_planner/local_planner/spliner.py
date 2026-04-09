@@ -12,7 +12,7 @@ class SplinerNode(Node):
         super().__init__('spliner_node')
 
         # Parameters
-        self.declare_parameter("waypoints_path", "/race_stack_2526/src/pure_pursuit/racelines/korea_mintime_sparse.csv")
+        self.declare_parameter("waypoints_path", "./src/pure_pursuit/racelines/korea_mintime_sparse.csv")
         self.declare_parameter("odom_topic", "/ego_racecar/odom")
         self.declare_parameter("local_path_topic", "/local_path")
         self.declare_parameter("num_future_waypoints", 5) 

@@ -4,7 +4,7 @@ controller_manager_node:
     # -------------------------------------------------------
     # Waypoints
     # -------------------------------------------------------
-    waypoints_path: "/race_stack_2526/src/pure_pursuit/racelines/korea_mintime_sparse.csv"
+    waypoints_path: "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
     reverse_waypoints: false         # Set true to drive anticlockwise
     local_waypoints_window: 10          
     # -------------------------------------------------------

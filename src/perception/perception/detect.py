@@ -55,8 +55,7 @@ class Detect(Node):
         # -----------------------------
         # LOAD TRACK CSV
         # -----------------------------
-        self.csv_path = "/race_stack_2526/src/pure_pursuit/racelines/korea_mintime_sparse.csv"
-        #self.csv_path = "/home/belroy/race_stack_2526/src/pure_pursuit/racelines/arc.csv"
+        self.csv_path = "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
         data = np.loadtxt(self.csv_path, delimiter=",")
         # --- TEMPORARY DEBUG ---
         data = np.loadtxt(self.csv_path, delimiter=",")

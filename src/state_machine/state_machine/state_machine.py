@@ -3,7 +3,6 @@ import rclpy
 from rclpy.node import Node
 import numpy as np
 from std_msgs.msg import String, Float32MultiArray, Bool
-from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 from rclpy.qos import qos_profile_sensor_data
 from state_machine.drive_state import DriveState
@@ -24,14 +23,6 @@ class StateMachine(Node):
         self.declare_parameter('safety_lateral_distance', 0.5)
         # Longitudinal trigger window in Frenet s (meters) around the car.
         self.declare_parameter('trigger_distance', 3.0)
-        # Maximum age (seconds) of obs_topic data before lidar fallback is used.
-        self.declare_parameter('obs_timeout_sec', 0.5)
-        # Lidar topic used only as fallback when Frenet obstacle data is stale.
-        self.declare_parameter('scan_topic', '/scan')
-        # Fallback trigger distance (meters): closer than this enters FTG.
-        self.declare_parameter('scan_trigger_distance', 0.7)
-        # Fallback clear distance (meters): farther than this returns to GB_TRACK.
-        self.declare_parameter('scan_clear_distance', 1.2)
         # RViz marker topic for live state text.
         self.declare_parameter('state_marker_topic', '/state_marker')
         # TF frame where state text is displayed.
@@ -39,24 +30,13 @@ class StateMachine(Node):
         self.obs_topic = self.get_parameter('obs_topic').value
         self.safety_lateral_distance = float(self.get_parameter('safety_lateral_distance').value)
         self.trigger_distance = float(self.get_parameter('trigger_distance').value)
-        self.obs_timeout_sec = float(self.get_parameter('obs_timeout_sec').value)
-        self.scan_topic = self.get_parameter('scan_topic').value
-        self.scan_trigger_distance = float(self.get_parameter('scan_trigger_distance').value)
-        self.scan_clear_distance = float(self.get_parameter('scan_clear_distance').value)
         self.state_marker_topic = self.get_parameter('state_marker_topic').value
         self.state_marker_frame = self.get_parameter('state_marker_frame').value
-        self.last_obs_msg_time = None
 
         self.obs_sub = self.create_subscription(
             Float32MultiArray,
             self.obs_topic,
             self.obs_callback,
-            qos_profile_sensor_data,
-        )
-        self.scan_sub = self.create_subscription(
-            LaserScan,
-            self.scan_topic,
-            self.scan_callback,
             qos_profile_sensor_data,
         )
 
@@ -77,9 +57,6 @@ class StateMachine(Node):
             % (self.obs_topic, self.safety_lateral_distance, self.trigger_distance)
         )
         self.publish_state()
-
-    def _now_sec(self):
-        return self.get_clock().now().nanoseconds * 1e-9
 
     def publish_state(self):
         state_msg = String()
@@ -169,7 +146,6 @@ class StateMachine(Node):
         return candidates[idx]
 
     def obs_callback(self, msg):
-        self.last_obs_msg_time = self._now_sec()
         obs_wpts = self.parse_obs_wpts(msg)
         closest = self.get_closest_obstacle(obs_wpts)
 
@@ -214,42 +190,6 @@ class StateMachine(Node):
 
         self.current_state = new_state
         self.publish_state()
-
-    def scan_callback(self, msg):
-        # Use lidar as a fallback only when obstacle Frenet data is stale/missing.
-        now = self._now_sec()
-        if self.last_obs_msg_time is not None and (now - self.last_obs_msg_time) <= self.obs_timeout_sec:
-            return
-        ranges = np.array(msg.ranges, dtype=float)
-        valid = ranges[np.isfinite(ranges) & (ranges > 0.05)]
-        if valid.size == 0:
-            return
-
-        min_dist = float(np.min(valid))
-        new_state = self.current_state
-
-        if min_dist < self.scan_trigger_distance:
-            if True:
-                new_state = DriveState.FTGONLY
-            else:
-                new_state = DriveState.TRAILING
-        elif self.current_state == DriveState.TRAILING:
-            if min_dist > self.scan_clear_distance:
-                new_state = DriveState.GB_TRACK
-            elif self.overtake_feasible:
-                new_state = DriveState.FTGONLY
-
-        elif self.current_state == DriveState.FTGONLY: 
-            if min_dist > self.scan_clear_distance:
-                new_state = DriveState.GB_TRACK
-
-        if new_state != self.current_state:
-            self.get_logger().info(
-                f"State switch {self.current_state.value} -> {new_state.value} "
-                f"(lidar fallback, min_dist={min_dist:.2f})"
-            )
-            self.current_state = new_state
-            self.publish_state()
 
 def main(args=None):
     rclpy.init(args=args)

@@ -1,6 +1,9 @@
-Something to take note: 
+### To run ###
+```python
+ros2 launch state_machine state_machine_launch.py
+```
 
-Changed/ Added: 
+### Changed/ Added: ### 
 ```
 controller_manager, controller_manager.yaml, pure_pursuit_logic_modified, ftg_logic, opp_controller
 
@@ -12,12 +15,12 @@ launch_master
 For new maps: copy korea.png and korea.yaml into f1tenth_gym_ros/maps, and change sim.yaml
 
 csv file has been pushed tgt  
- --note: korea_mintime_detailed contains # s_m; x_m; y_m; psi_rad; kappa_radpm; vx_mps; ax_mps2, it might help you in some way  
-         korea_mintime_sparse contains x,y,v  
-         korea.csv is the wpts of the track's centerline and track width
+ --note:   
+korea_mintime_sparse.csv contains x,y,v  
+korea.csv is the wpts of the track's centerline and track width  
 
 **launch_master**
-1. a parent launch file to run everything in the future
+1. a parent launch file to run everything in the future, can modify at your convenience
 2. e.g. act as a parent launch file to run other node's launch file
 
 **Controller Manager.py**

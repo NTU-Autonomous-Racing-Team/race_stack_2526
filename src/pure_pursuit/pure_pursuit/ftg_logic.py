@@ -28,7 +28,7 @@ class FTGLogic:
                     proc_ranges[further_idx:end+1] = dist
         return proc_ranges
 
-    def process_lidar(self, msg):
+    def process_lidar(self, msg, target_angle=None):
         ranges = np.array(msg.ranges)
         ranges[np.isnan(ranges)] = 0
         ranges[np.isinf(ranges)] = 10.0
@@ -46,10 +46,33 @@ class FTGLogic:
         
         if not gaps:
             return 1.0, 0.0
-            
-        largest_gap = max(gaps, key=len)
-        best_idx = (largest_gap[0] + largest_gap[-1]) // 2
-        
+        # ==========================================
+        # --- GOAL-DIRECTED SELECTION LOGIC ---
+        # ==========================================
+        if target_angle is None:
+            largest_gap = max(gaps, key=len)
+            best_idx = (largest_gap[0] + largest_gap[-1]) // 2
+        else:
+            scores = np.full(len(safe_ranges), -np.inf)
+
+            # Correctly aligned angles for the cropped FOV
+            full_angles = msg.angle_min + np.arange(len(msg.ranges)) * msg.angle_increment
+            angles = full_angles[start:start + len(safe_ranges)]
+
+            valid_indices = np.concatenate(gaps)
+
+            goal_weight = 5.0  # tunable, now dimensionally consistent
+
+            angle_diffs = np.abs(angles[valid_indices] - target_angle)
+            angle_diffs_norm = angle_diffs / np.pi
+            range_norm = safe_ranges[valid_indices] / np.max(safe_ranges[valid_indices] + 1e-6)
+
+            scores[valid_indices] = range_norm - (goal_weight * angle_diffs_norm)
+
+            # Only pick best among valid gap indices
+            best_idx = valid_indices[np.argmax(scores[valid_indices])]
+        # ==========================================
+
         steering = msg.angle_min + (best_idx + start) * msg.angle_increment
         steering = np.clip(steering, -self.max_steering, self.max_steering)
         self.prev_steering = 0.6 * self.prev_steering + 0.4 * steering 

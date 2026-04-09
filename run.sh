@@ -10,4 +10,4 @@ source ./install/local_setup.bash
 
 echo "Ensure the F1Tenth simulator is already running."
 echo "Launching evaluation..."
-ros2 launch state_machine state_machine.py
+ros2 launch state_machine state_machine_launch.py

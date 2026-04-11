@@ -6,6 +6,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32MultiArray
 from tf2_ros import Buffer, TransformListener
 from rclpy.time import Time, Duration
+from rclpy.qos import qos_profile_sensor_data
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
  
@@ -74,7 +75,7 @@ class Detect(Node):
         # -----------------------------
         # ROS SETUP
         # -----------------------------
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_cb, 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
         self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
         self.raceline_pub = self.create_publisher(MarkerArray, '/raceline_marker', 10)
@@ -100,11 +101,15 @@ class Detect(Node):
         # -----------------------------
         self.tracked = []
         self.next_id = 0
+
+        # Build raceline markers once; timer callback only stamps/publishes.
+        self.raceline_markers = self._build_raceline_markers(x, y, psi)
  
         # -----------------------------
         # RACELINE TIMER
         # -----------------------------
-        self.create_timer(1.0, self.publish_raceline)
+        self.raceline_timer = self.create_timer(1.0, self.publish_raceline)
+        self.publish_raceline()
  
         self.get_logger().info("Detect node ready!")
  
@@ -183,15 +188,9 @@ class Detect(Node):
     # -----------------------------
     # PUBLISH RACELINE BOUNDARY
     # -----------------------------
-    def publish_raceline(self):
-        data = np.loadtxt(self.csv_path, delimiter=",")
-        x = data[:, 0]
-        y = data[:, 1] 
-        psi = compute_psi(x, y)
- 
+    def _build_raceline_markers(self, x, y, psi):
         center_marker = Marker()
         center_marker.header.frame_id = 'map'
-        center_marker.header.stamp = self.get_clock().now().to_msg()
         center_marker.ns = 'raceline'
         center_marker.id = 0
         center_marker.type = Marker.LINE_STRIP
@@ -202,7 +201,6 @@ class Detect(Node):
  
         left_marker = Marker()
         left_marker.header.frame_id = 'map'
-        left_marker.header.stamp = self.get_clock().now().to_msg()
         left_marker.ns = 'raceline'
         left_marker.id = 1
         left_marker.type = Marker.LINE_STRIP
@@ -214,7 +212,6 @@ class Detect(Node):
  
         right_marker = Marker()
         right_marker.header.frame_id = 'map'
-        right_marker.header.stamp = self.get_clock().now().to_msg()
         right_marker.ns = 'raceline'
         right_marker.id = 2
         right_marker.type = Marker.LINE_STRIP
@@ -246,7 +243,15 @@ class Detect(Node):
  
         marker_array = MarkerArray()
         marker_array.markers = [center_marker, left_marker, right_marker]
-        self.raceline_pub.publish(marker_array)
+        return marker_array
+
+    def publish_raceline(self):
+        stamp = self.get_clock().now().to_msg()
+        for marker in self.raceline_markers.markers:
+            marker.header.stamp = stamp
+        point_count = len(self.raceline_markers.markers[0].points)
+        self.get_logger().info("Publishing raceline markers {} points".format(point_count))
+        self.raceline_pub.publish(self.raceline_markers)
  
     # -----------------------------
     # PUBLISH MARKERS
@@ -298,7 +303,7 @@ class Detect(Node):
                 'map',
                 scan.header.frame_id,
                 Time(),
-                timeout=Duration(seconds=0.1)
+                timeout=Duration(seconds=0.01)
             )
         except Exception as e:
             self.get_logger().warn(f"TF lookup failed: {e}")
@@ -328,9 +333,6 @@ class Detect(Node):
         if points_global.shape[0] == 0:
             current_time = time.time()
             self.tracked = [t for t in self.tracked if current_time - t.last_seen < self.max_age]
-            new_ids = {t.id for t in self.tracked}
-            dead_ids = self.active_marker_ids - new_ids
-            self.active_marker_ids = new_ids
 
             msg = Float32MultiArray()
             flat = []
@@ -338,7 +340,7 @@ class Detect(Node):
                 flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
             msg.data = flat
             self.pub.publish(msg)
-            self.publish_obstacle_markers(dead_ids)
+            self.publish_obstacle_markers(self.tracked)
             return
 
         # DEBUG: check coordinate alignment

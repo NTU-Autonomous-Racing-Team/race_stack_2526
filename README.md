@@ -1,20 +1,24 @@
-### Cloning the repository
+## Overview
+Integrated the perception module (`detect.py`) with the local planning module (`spliner.py`). 
 
-Execute the following command to clone the repository:
-```bash
-git clone --recursive https://github.com/NTU-Autonomous-Racing-Team/race_stack_2526
-```
+## Key Features
+- **Unified Coordinate System**: Both nodes utilize `frenet_conversion.frenet_converter` 
+- **Standardized Messaging**: Communication between nodes is handled via `f110_msgs.msg`
+- **Visualization**: Added RViz  visualization of:
+  - Obstacle bounding boxes (red CUBE markers with orientation, somehow not shown yet).
+  - Local spline paths (purple Line Strip markers).
 
-### Running the Race Stack
+## Execution Pipeline
 
-First, execute the following command to start the simulator:
-
-```bash
-bash simulate.sh
-```
-
-Then, open another terminal to execute the following code to get the car moving:
-
-```bash
-bash run.sh
-```
+1. **Launch Simulation**:
+   ```bash
+   bash simulate.sh
+   ```
+2. **Run Perception Node**:
+   ```bash
+   ros2 run perception detect
+   ```
+3. **Run Local Planner Node**:
+   ```bash
+   ros2 run local_planner spliner
+   ```

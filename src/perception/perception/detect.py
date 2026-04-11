@@ -34,10 +34,11 @@ def compute_psi(x, y):
 # TRACKED OBSTACLE
 # -----------------------------
 class TrackedObstacle:
-    def __init__(self, obs_id, s, d, size_s, size_d):
+    def __init__(self, obs_id, s, d, theta, size_s, size_d):
         self.id = obs_id
         self.s = s
         self.d = d
+        self.theta = theta
         self.vs = 0.0
         self.vd = 0.0
         self.size_s = size_s
@@ -58,7 +59,7 @@ class Detect(Node):
         self.csv_path = "/sim_ws/src/pure_pursuit/racelines/arc.csv"
         data = np.loadtxt(self.csv_path, delimiter=",")
         # --- TEMPORARY DEBUG ---
-        data = np.loadtxt(self.csv_path, delimiter=",")
+        # data = np.loadtxt(self.csv_path, delimiter=",")
         # print(f"Raw raceline first point: {data[0,0]:.3f}, {data[0,1]:.3f}")
         # print(f"Raw raceline X range: {data[:,0].min():.3f} to {data[:,0].max():.3f}")
         # print(f"Raw raceline Y range: {data[:,1].min():.3f} to {data[:,1].max():.3f}")
@@ -272,15 +273,31 @@ class Detect(Node):
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'obstacles'
             marker.id = t.id
-            marker.type = Marker.SPHERE
+            # marker.type = Marker.SPHERE
+            # marker.action = Marker.ADD
+            # marker.pose.position.x = xy[0]
+            # marker.pose.position.y = xy[1]
+            # marker.pose.position.z = 0.1
+            # marker.pose.orientation.w = 1.0
+            # marker.scale.x = max(t.size_s, 0.3)
+            # marker.scale.y = max(t.size_d, 0.3)
+            # marker.scale.z = 0.3
+
+            marker.type = Marker.CUBE 
             marker.action = Marker.ADD
+            
             marker.pose.position.x = xy[0]
             marker.pose.position.y = xy[1]
             marker.pose.position.z = 0.1
-            marker.pose.orientation.w = 1.0
-            marker.scale.x = max(t.size_s, 0.3)
-            marker.scale.y = max(t.size_d, 0.3)
-            marker.scale.z = 0.3
+            marker.pose.orientation.x = 0.0
+            marker.pose.orientation.y = 0.0
+            marker.pose.orientation.z = np.sin(t.theta / 2.0)
+            marker.pose.orientation.w = np.cos(t.theta / 2.0)
+            
+            marker.scale.x = t.size_s
+            marker.scale.y = t.size_d
+            marker.scale.z = 0.2
+
             marker.color.a = 0.8
             marker.color.r = 1.0
             marker.color.g = 0.0
@@ -421,7 +438,7 @@ class Detect(Node):
                 best_match.last_seen = current_time
                 updated_tracks.append(best_match)
             else:
-                new_track = TrackedObstacle(self.next_id, s_det, d_det, size_s, size_d)
+                new_track = TrackedObstacle(self.next_id, s_det, d_det, size_s, size_d, theta)
                 self.next_id += 1
                 updated_tracks.append(new_track)
  

@@ -3,15 +3,15 @@
 <package format="3">
   <name>local_planner</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="morningsunny79@gmail.com">root</maintainer>
-  <license>TODO: License declaration</license>
+  <description>Local spline overtake planner.</description>
+  <maintainer email="hari@example.com">hari</maintainer>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
-  <depend>f110_msgs</depend>
-  <depend>python3-numpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>python3-scipy</depend>
 
   <test_depend>ament_copyright</test_depend>

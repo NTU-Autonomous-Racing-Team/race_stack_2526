@@ -1,40 +1,44 @@
 controller_manager_node:
   ros__parameters:
-
-    # -------------------------------------------------------
-    # Waypoints
-    # -------------------------------------------------------
     waypoints_path: "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
-    reverse_waypoints: false         # Set true to drive anticlockwise
-    local_waypoints_window: 10          
-    # -------------------------------------------------------
-    # Topics
-    # -------------------------------------------------------
-    odom_topic:      "/ego_racecar/odom"
-    opp_odom_topic:  "/opp_racecar/odom"
-    drive_topic:     "/drive"
-    opp_drive_topic:  "/opp_drive"
-    # -------------------------------------------------------
-    # Pure Pursuit
-    # -------------------------------------------------------
-    wheelbase:            0.33
-    min_lookahead:        0.3        # metres
-    max_lookahead:        1.8        # metres
-    lookahead_ratio:      9.0
-    K_p:                  0.5
-    steering_limit:       25.0       # degrees
-    velocity_percentage:  1.2
+    odom_topic: "/ego_racecar/odom"
+    drive_topic: "/drive"
+    scan_topic: "/scan"
+    state_topic: "/state"
 
-    # -------------------------------------------------------
-    # GB_TRACK Transition
-    # -------------------------------------------------------
-    transition_d_threshold:    0.1   # metres lateral offset to consider "on raceline"
-    transition_s_threshold:    1.0   # metres ahead/behind nearest waypoint
-    transition_frames_required: 30   # consecutive frames needed before leaving transition
-    max_steering_rate:         0.15  # max radians the wheels can turn per frame
+    min_lookahead: 0.8
+    max_lookahead: 2.2
+    lookahead_ratio: 8.5
+    steering_limit: 25.0
+    velocity_percentage: 0.62
+    max_speed_cap: 3.6
+    wheelbase: 0.33
+    local_waypoints_window: 120
+    visualize_lookahead: true
 
-    # -------------------------------------------------------
-    # Obstacle / Clearance Check
-    # -------------------------------------------------------
-    clearance_distance:   1.5        # metres ahead that must be clear
-    safe_corridor_width:  0.45       # car width + safety margin (metres)
+    max_steering_rate: 0.20
+    offtrack_d_limit: 0.45
+    recovery_speed: 0.95
+    publish_state_markers: true
+    uturn_heading_error_deg: 80.0
+    gb_min_speed: 1.70
+    overtake_min_speed: 1.55
+    dynamic_speed_min_scale: 0.70
+    dynamic_speed_steer_penalty: 0.34
+
+    planner_path_topic: "/planner/local_path"
+    planner_active_topic: "/planner/path_active"
+    locked_overtake_path_topic: "/planner/locked_overtake_path"
+    overtake_speed_boost: 0.10
+    overtake_speed_cap: 2.10
+    overtake_lookahead_scale: 0.90
+    overtake_steering_limit_deg: 18.0
+    overtake_max_steering_rate: 0.26
+    overtake_min_path_points: 10
+    overtake_reacquire_sec: 1.0
+
+    opponent_detection_topic: "/opponent_detection"
+    opponent_detected_topic: "/opponent_detected"
+    opponent_hold_sec: 0.45
+    use_ground_truth_opponent: false
+    opp_odom_topic: "/ego_racecar/opp_odom"

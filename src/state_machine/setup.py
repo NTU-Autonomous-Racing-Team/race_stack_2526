@@ -24,7 +24,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'state_machine = state_machine.state_machine:main'
+            'state_machine = state_machine.state_machine:main',
+            'obstacle_detector = state_machine.obstacle_detector:main',
+            'opponent_detector = state_machine.opponent_detector:main',
         ],
     },
 )

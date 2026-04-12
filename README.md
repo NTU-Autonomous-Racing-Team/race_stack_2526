@@ -1,45 +1,120 @@
-### To run ###
-```python
+# Korea Race Stack (Spliner Overtake Integration)
+
+This repository contains our F1TENTH simulation stack for Korea map testing, focused on a robust local overtake planner (`spliner`) integrated with global pure pursuit.
+
+Current driving modes:
+- `GB_TRACK`: follow global racing waypoints
+- `OVERTAKE`: follow local spline bypass around an on-raceline hazard
+
+No FTG fallback is active in this branch. Overtake behavior is local-path-driven.
+
+## Quick Start
+
+From repo root:
+
+```bash
+bash simulate.sh
+```
+
+Then in a second terminal:
+
+```bash
+bash run.sh
+```
+
+The evaluation launch is:
+
+```bash
 ros2 launch state_machine state_machine_launch.py
 ```
 
-### Changed/ Added: ### 
-```
-controller_manager, controller_manager.yaml, pure_pursuit_logic_modified, ftg_logic, opp_controller
+## What This Branch Is For
 
-state_machine.py, drive_state.py, state_machine launchfile
+- Validate spliner overtake logic end-to-end in simulation
+- Stress test obstacle bypass and rejoin behavior
+- Collect team feedback on path quality, state transitions, and tuning
 
-launch_master
-```
+## System Flow
 
-For new maps: copy korea.png and korea.yaml into f1tenth_gym_ros/maps, and change sim.yaml
+1. `obstacle_detector` reads `/scan`, filters clusters, and publishes static obstacle status and pose.
+2. `state_machine` decides `GB_TRACK` vs `OVERTAKE` using hazard + planner readiness.
+3. `spliner` generates a local overtake trajectory (`/planner/local_path`) when hazard is valid.
+4. `controller_manager` locks that local path during `OVERTAKE` and tracks it until clear, then returns to global tracking.
 
-csv file has been pushed tgt  
- --note:   
-korea_mintime_sparse.csv contains x,y,v  
-korea.csv is the wpts of the track's centerline and track width  
+## Spliner Logic (Core)
 
-**launch_master**
-1. a parent launch file to run everything in the future, can modify at your convenience
-2. e.g. act as a parent launch file to run other node's launch file
+The local path is generated in Frenet coordinates, then mapped back to Cartesian:
 
-**Controller Manager.py**
-1. Only change the parameters in controller_manager.yaml, and pass it to the node via launch file (check statemachine launch.py)
-2. set parameter self.reverse_waypoints to True to run your car in anticlockwise direction as in competition, we might race in either direction during head to head race. Should ensure the calculation (especially the part using frenet) works fine in both direction
-3. (for simulation) It will spawn 2 cars upon starting, with both running pure pursuit, can adjust the car initial pose by changing the index @ line 123 or 150&151
-4. Added Trailing: follow the front car when overtake is not feasible
-5. Added safe transition logic: Ensure it navigate safely to the raceline when switch from other states to GB_TRACK as pp is blind 
+1. Convert ego and obstacle to Frenet `(s, d)` on the global raceline.
+2. Compute longitudinal gap `s_gap` and reject hazards outside planning horizon.
+3. Select overtake side (currently right-preferred in launch parameters).
+4. Build a lateral control profile with cubic spline:
+   - control points start at `d=0`
+   - reach `d_apex` near obstacle
+   - return to `d=0` after passing
+5. Sample spline points and transform each `(s, d)` back to `(x, y)` for `/planner/local_path`.
+6. Controller locks this path as `/planner/locked_overtake_path` and follows it consistently.
 
-**pure_pursuit**
-1. the modified version use ackermann kinematics model to calculate steering angle and use the intersection of lookahead circle and global wpts as the target wpts
-both version work well in sim, but I am thinking that a proper kinematics model will be more suitable to real world as compared to using proportional gain. 
- -- Should test out both version ltr on
+Because the profile is constrained to return to `d=0`, rejoin to the global line is natural and smooth, not a hard jump to a waypoint index.
 
-**state_machine**
-1. wired detect.py into it (local planner not yet)
-2. integrated trailng logic into it (still have some TODO to complete)
+## Visualization (RViz)
 
-Both trailing and safe transition is working well when tested alone, but haven't verify and would need more testing after integrated into state machine, as it subjected to the robustness of decision logic of state machine and also missing some input from local planner
+- Global track line: `/full_track_path`
+- Lookahead point: `/waypoint_markers` (`lookahead_point`)
+- Overtake path used by controller: `/planner/locked_overtake_path`
+- State display above car:
+  - `state_color_dot` and `state_text` on `/waypoint_markers`
+  - `GB_TRACK` = green
+  - `OVERTAKE` = cyan
 
-**state_estimation**
-1. working in progress, ignore it for now
+## Key Files
+
+- Spliner planner: `src/local_planner/local_planner/spliner.py`
+- Frenet conversion for planner: `src/local_planner/local_planner/frenet_converter.py`
+- State machine: `src/state_machine/state_machine/state_machine.py`
+- Static obstacle detector: `src/state_machine/state_machine/obstacle_detector.py`
+- Controller integration: `src/pure_pursuit/pure_pursuit/controller_manager.py`
+- Sim config (map, topics, spawn): `src/f1tenth_gym_ros/config/sim.yaml`
+- Team launch wiring: `src/state_machine/launch/state_machine_launch.py`
+
+## Main Topics
+
+- Inputs:
+  - `/scan`
+  - `/ego_racecar/odom`
+  - `/obstacle_detected`
+  - `/obstacle_distance`
+  - `/static_obstacle_pose`
+- Planner outputs:
+  - `/planner/local_path`
+  - `/planner/path_active`
+  - `/planner/overtake_feasible`
+- State:
+  - `/state`
+- Drive:
+  - `/drive`
+
+## Maps and Raceline
+
+- Korea map files are in `src/f1tenth_gym_ros/maps/`
+- Active map is configured in `src/f1tenth_gym_ros/config/sim.yaml`
+- Raceline used by planner/controller:
+  - `src/pure_pursuit/racelines/korea_mintime_sparse.csv`
+
+## Tuning Notes
+
+Most practical tuning happens through node parameters in:
+- `src/state_machine/launch/state_machine_launch.py`
+- `src/pure_pursuit/config/controller_manager.yaml`
+- Detector sensitivity and track filter thresholds
+- Spliner horizon, lateral margins, and smoothing
+- State transition timing and overtake commitment
+- Controller speed caps, steering rate limits, and overtake behavior
+
+## Team Testing Checklist
+
+- Confirm `GB_TRACK` remains stable when no hazard exists.
+- Confirm `OVERTAKE` triggers only for valid on-raceline hazard.
+- Confirm locked local path is followed without side switching.
+- Confirm clean rejoin to global track after obstacle clearance.
+- Report corner cases with logs and screenshots when possible.

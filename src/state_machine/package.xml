@@ -3,14 +3,16 @@
 <package format="3">
   <name>state_machine</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="ccluna.chen@gmail.com">root</maintainer>
-  <license>TODO: License declaration</license>
+  <description>State switching logic for GB/OVERTAKE line-following.</description>
+  <maintainer email="hari@example.com">hari</maintainer>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>geometry_msgs</depend>
   <depend>visualization_msgs</depend>
+  <depend>std_msgs</depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

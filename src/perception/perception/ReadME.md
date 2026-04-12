@@ -1,5 +1,5 @@
 # Obstacle Detection Node — `detect.py`
-
+## You can tune the self.boundary_inflation to push the boundaries(yellow lines) towards the raceline.
 ## Dependencies
 
 Install the required Python packages before running:

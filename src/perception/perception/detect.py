@@ -6,7 +6,6 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32MultiArray
 from tf2_ros import Buffer, TransformListener
 from rclpy.time import Time, Duration
-from rclpy.qos import qos_profile_sensor_data
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
  
@@ -14,8 +13,8 @@ import numpy as np
 import time
 from sklearn.cluster import DBSCAN
 from scipy.spatial.transform import Rotation
- 
-from frenet_conversion.frenet_converter import FrenetConverter
+from f110_msgs.msg import Obstacle, ObstacleArray
+from frenet_conversion import FrenetConverter
  
 # -----------------------------
 # HELPERS
@@ -35,10 +34,11 @@ def compute_psi(x, y):
 # TRACKED OBSTACLE
 # -----------------------------
 class TrackedObstacle:
-    def __init__(self, obs_id, s, d, size_s, size_d):
+    def __init__(self, obs_id, s, d, theta, size_s, size_d):
         self.id = obs_id
         self.s = s
         self.d = d
+        self.theta = theta
         self.vs = 0.0
         self.vd = 0.0
         self.size_s = size_s
@@ -56,13 +56,13 @@ class Detect(Node):
         # -----------------------------
         # LOAD TRACK CSV
         # -----------------------------
-        self.csv_path = "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
+        self.csv_path = "/sim_ws/src/pure_pursuit/racelines/arc.csv"
         data = np.loadtxt(self.csv_path, delimiter=",")
         # --- TEMPORARY DEBUG ---
-        data = np.loadtxt(self.csv_path, delimiter=",")
-        #print(f"Raw raceline first point: {data[0,0]:.3f}, {data[0,1]:.3f}")
-        #print(f"Raw raceline X range: {data[:,0].min():.3f} to {data[:,0].max():.3f}")
-        #print(f"Raw raceline Y range: {data[:,1].min():.3f} to {data[:,1].max():.3f}")
+        # data = np.loadtxt(self.csv_path, delimiter=",")
+        # print(f"Raw raceline first point: {data[0,0]:.3f}, {data[0,1]:.3f}")
+        # print(f"Raw raceline X range: {data[:,0].min():.3f} to {data[:,0].max():.3f}")
+        # print(f"Raw raceline Y range: {data[:,1].min():.3f} to {data[:,1].max():.3f}")
         # --- END DEBUG ---
 
         x = data[:, 0] 
@@ -75,8 +75,9 @@ class Detect(Node):
         # -----------------------------
         # ROS SETUP
         # -----------------------------
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
-        self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_cb, 10)
+        # self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
+        self.pub = self.create_publisher(ObstacleArray, '/obstacles', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
         self.raceline_pub = self.create_publisher(MarkerArray, '/raceline_marker', 10)
  
@@ -101,15 +102,12 @@ class Detect(Node):
         # -----------------------------
         self.tracked = []
         self.next_id = 0
-
-        # Build raceline markers once; timer callback only stamps/publishes.
-        self.raceline_markers = self._build_raceline_markers(x, y, psi)
+        self.active_marker_ids = set()
  
         # -----------------------------
         # RACELINE TIMER
         # -----------------------------
-        self.raceline_timer = self.create_timer(1.0, self.publish_raceline)
-        self.publish_raceline()
+        self.create_timer(1.0, self.publish_raceline)
  
         self.get_logger().info("Detect node ready!")
  
@@ -188,9 +186,15 @@ class Detect(Node):
     # -----------------------------
     # PUBLISH RACELINE BOUNDARY
     # -----------------------------
-    def _build_raceline_markers(self, x, y, psi):
+    def publish_raceline(self):
+        data = np.loadtxt(self.csv_path, delimiter=",")
+        x = data[:, 0]
+        y = data[:, 1] 
+        psi = compute_psi(x, y)
+ 
         center_marker = Marker()
         center_marker.header.frame_id = 'map'
+        center_marker.header.stamp = self.get_clock().now().to_msg()
         center_marker.ns = 'raceline'
         center_marker.id = 0
         center_marker.type = Marker.LINE_STRIP
@@ -201,6 +205,7 @@ class Detect(Node):
  
         left_marker = Marker()
         left_marker.header.frame_id = 'map'
+        left_marker.header.stamp = self.get_clock().now().to_msg()
         left_marker.ns = 'raceline'
         left_marker.id = 1
         left_marker.type = Marker.LINE_STRIP
@@ -212,6 +217,7 @@ class Detect(Node):
  
         right_marker = Marker()
         right_marker.header.frame_id = 'map'
+        right_marker.header.stamp = self.get_clock().now().to_msg()
         right_marker.ns = 'raceline'
         right_marker.id = 2
         right_marker.type = Marker.LINE_STRIP
@@ -243,51 +249,59 @@ class Detect(Node):
  
         marker_array = MarkerArray()
         marker_array.markers = [center_marker, left_marker, right_marker]
-        return marker_array
-
-    def publish_raceline(self):
-        stamp = self.get_clock().now().to_msg()
-        for marker in self.raceline_markers.markers:
-            marker.header.stamp = stamp
-        point_count = len(self.raceline_markers.markers[0].points)
-        self.get_logger().info("Publishing raceline markers {} points".format(point_count))
-        self.raceline_pub.publish(self.raceline_markers)
+        self.raceline_pub.publish(marker_array)
  
     # -----------------------------
     # PUBLISH MARKERS
     # -----------------------------
-    def publish_obstacle_markers(self, active_tracks):
+    def publish_obstacle_markers(self, dead_ids=set()):
         marker_array = MarkerArray()
  
-        # Clear prior obstacle markers on every cycle so RViz shows only active obstacles.
-        clear_marker = Marker()
-        clear_marker.header.frame_id = 'map'
-        clear_marker.header.stamp = self.get_clock().now().to_msg()
-        clear_marker.ns = 'obstacles'
-        clear_marker.action = Marker.DELETEALL
-        marker_array.markers.append(clear_marker)
+        for dead_id in dead_ids:
+            marker = Marker()
+            marker.header.frame_id = 'map'
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = 'obstacles'
+            marker.id = dead_id
+            marker.action = Marker.DELETE
+            marker_array.markers.append(marker)
  
-        for t in active_tracks:
+        for t in self.tracked:
             xy = self.converter.get_cartesian(t.s, t.d)
             marker = Marker()
             marker.header.frame_id = 'map'
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'obstacles'
             marker.id = t.id
-            marker.type = Marker.SPHERE
+            # marker.type = Marker.SPHERE
+            # marker.action = Marker.ADD
+            # marker.pose.position.x = xy[0]
+            # marker.pose.position.y = xy[1]
+            # marker.pose.position.z = 0.1
+            # marker.pose.orientation.w = 1.0
+            # marker.scale.x = max(t.size_s, 0.3)
+            # marker.scale.y = max(t.size_d, 0.3)
+            # marker.scale.z = 0.3
+
+            marker.type = Marker.CUBE 
             marker.action = Marker.ADD
+            
             marker.pose.position.x = xy[0]
             marker.pose.position.y = xy[1]
             marker.pose.position.z = 0.1
-            marker.pose.orientation.w = 1.0
-            marker.scale.x = max(t.size_s, 0.3)
-            marker.scale.y = max(t.size_d, 0.3)
-            marker.scale.z = 0.3
+            marker.pose.orientation.x = 0.0
+            marker.pose.orientation.y = 0.0
+            marker.pose.orientation.z = np.sin(t.theta / 2.0)
+            marker.pose.orientation.w = np.cos(t.theta / 2.0)
+            
+            marker.scale.x = t.size_s
+            marker.scale.y = t.size_d
+            marker.scale.z = 0.2
+
             marker.color.a = 0.8
             marker.color.r = 1.0
             marker.color.g = 0.0
             marker.color.b = 0.0
-            marker.lifetime = Duration(seconds=0.2).to_msg()
             marker_array.markers.append(marker)
  
         self.marker_pub.publish(marker_array)
@@ -303,51 +317,37 @@ class Detect(Node):
                 'map',
                 scan.header.frame_id,
                 Time(),
-                timeout=Duration(seconds=0.01)
+                timeout=Duration(seconds=0.1)
             )
         except Exception as e:
-            self.get_logger().warn(f"TF lookup failed: {e}")
+            # self.get_logger().warn(f"TF lookup failed: {e}")
             return
  
         # -----------------------------
         # FILTER INVALID SCAN POINTS
         # -----------------------------
         ranges_raw = np.array(scan.ranges)
-        valid_mask = np.isfinite(ranges_raw) & (ranges_raw >= scan.range_min) & (ranges_raw <= self.max_range)
+        valid_mask = (ranges_raw >= scan.range_min) & (ranges_raw <= self.max_range)
         ranges = ranges_raw[valid_mask]
         angles_full = np.linspace(scan.angle_min, scan.angle_max, len(ranges_raw))
         angles = angles_full[valid_mask]
  
-        #self.get_logger().info(f"Valid scan points: {len(ranges)} / {len(ranges_raw)}")
+        # self.get_logger().info(f"Valid scan points: {len(ranges)} / {len(ranges_raw)}")
  
         x_local = ranges * np.cos(angles)
         y_local = ranges * np.sin(angles)
         points_local = np.vstack((x_local, y_local)).T
  
         T = from_vector3_msg(transform.transform.translation)
-        #print(f"Ego pos: x={T[0]:.3f}, y={T[1]:.3f}")
+        # print(f"Ego pos: x={T[0]:.3f}, y={T[1]:.3f}")
         R = from_quat_msg(transform.transform.rotation).as_matrix()
         points_global = (R[:2, :2] @ points_local.T).T + T[:2]
 
-        # DBSCAN needs at least one sample; keep current non-stale tracks and skip clustering.
-        if points_global.shape[0] == 0:
-            current_time = time.time()
-            self.tracked = [t for t in self.tracked if current_time - t.last_seen < self.max_age]
-
-            msg = Float32MultiArray()
-            flat = []
-            for t in self.tracked:
-                flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
-            msg.data = flat
-            self.pub.publish(msg)
-            self.publish_obstacle_markers(self.tracked)
-            return
-
         # DEBUG: check coordinate alignment
-        #print("Sample global point:", points_global[0])
-        #print("Raceline first point:",
-        #        self.converter.waypoints_x[0],
-        #        self.converter.waypoints_y[0])
+        # print("Sample global point:", points_global[0])
+        # print("Raceline first point:",
+                # self.converter.waypoints_x[0],
+                # self.converter.waypoints_y[0])
  
         # -----------------------------
         # DBSCAN CLUSTERING
@@ -362,7 +362,7 @@ class Detect(Node):
             mask = labels == label
             clusters.append(points_global[mask])
  
-        #self.get_logger().info(f"Clusters detected: {len(clusters)}")
+        # self.get_logger().info(f"Clusters detected: {len(clusters)}")
  
         # -----------------------------
         # RECTANGLE FITTING + FILTERING
@@ -372,7 +372,7 @@ class Detect(Node):
  
             # Min points filter
             if len(xy_points) < self.min_obs_size:
-                #self.get_logger().info(f'  -> REJECTED: too few points ({len(xy_points)})')
+                # self.get_logger().info(f'  -> REJECTED: too few points ({len(xy_points)})')
                 continue
  
             # Rectangle fit in Cartesian space
@@ -380,7 +380,7 @@ class Detect(Node):
  
             # Physical size filter — reject walls and large objects
             if size > self.max_obs_size:
-                #self.get_logger().info(f'  -> REJECTED by size filter (size={size:.2f}m)')
+                # self.get_logger().info(f'  -> REJECTED by size filter (size={size:.2f}m)')
                 continue
  
             # Convert fitted center to Frenet
@@ -388,20 +388,20 @@ class Detect(Node):
             s_center = float(s_arr[0])
             d_center = float(d_arr[0])
  
-            #self.get_logger().info(
-            #    f'cluster: pts={len(xy_points)} size={size:.2f}m '
-            #    f's={s_center:.2f} d={d_center:.2f}')
+            # self.get_logger().info(
+            #     f'cluster: pts={len(xy_points)} size={size:.2f}m '
+            #     f's={s_center:.2f} d={d_center:.2f}')
  
             # Track boundary filter
             if abs(d_center) > self.track_half_width:
-                #self.get_logger().info(
-                #    f'  -> REJECTED by track_half_width (d={d_center:.2f})')
+                # self.get_logger().info(
+                #     f'  -> REJECTED by track_half_width (d={d_center:.2f})')
                 continue
  
-            #self.get_logger().info(f'  -> ACCEPTED as detection')
+            self.get_logger().info(f'  -> ACCEPTED as detection')
             detections.append((s_center, d_center, size, size))
  
-        #self.get_logger().info(f"Valid obstacles: {len(detections)}")
+        # self.get_logger().info(f"Valid obstacles: {len(detections)}")
  
         # -----------------------------
         # TRACKING
@@ -438,29 +438,48 @@ class Detect(Node):
                 best_match.last_seen = current_time
                 updated_tracks.append(best_match)
             else:
-                new_track = TrackedObstacle(self.next_id, s_det, d_det, size_s, size_d)
+                new_track = TrackedObstacle(self.next_id, s_det, d_det, size_s, size_d, theta)
                 self.next_id += 1
                 updated_tracks.append(new_track)
  
         self.tracked = [t for t in updated_tracks if current_time - t.last_seen < self.max_age]
+        new_ids = {t.id for t in self.tracked}
+        dead_ids = self.active_marker_ids - new_ids
+        self.active_marker_ids = new_ids
  
-        #self.get_logger().info(f"Tracking objects: {len(self.tracked)}")
+        # self.get_logger().info(f"Tracking objects: {len(self.tracked)}")
  
         # -----------------------------
         # PUBLISH
         # -----------------------------
-        msg = Float32MultiArray()
-        flat = []
+        # msg = Float32MultiArray()
+        # flat = []
+        # for t in self.tracked:
+        #     flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
+        # msg.data = flat
+        # self.pub.publish(msg)
+ 
+        # self.publish_obstacle_markers(dead_ids)
+        obs_array_msg = ObstacleArray()
+        obs_array_msg.header = scan.header
         for t in self.tracked:
-            flat.extend([t.s, t.d, t.vs, t.vd, t.size_s, t.size_d, float(t.id)])
-        msg.data = flat
-        self.pub.publish(msg)
- 
-        self.publish_obstacle_markers(updated_tracks)
- 
+            o = Obstacle()
+            o.id = int(t.id)
+            o.s_center = float(t.s)
+            o.d_center = float(t.d)
+            o.vs = float(t.vs)
+            o.vd = float(t.vd)
+            o.size = float(max(t.size_s, t.size_d))
+            o.d_left = t.d + (t.size_d / 2.0)
+            o.d_right = t.d - (t.size_d / 2.0)
+            o.is_static = True #to be modify
+            
+            obs_array_msg.obstacles.append(o)
+            
+        self.pub.publish(obs_array_msg)
         end_time = time.perf_counter()
         latency = (end_time - start_time) * 1000
-        #self.get_logger().info(f"Loop latency: {latency:.2f} ms")
+        # self.get_logger().info(f"Loop latency: {latency:.2f} ms")
  
  
 # -----------------------------

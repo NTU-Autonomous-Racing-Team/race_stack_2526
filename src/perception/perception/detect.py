@@ -57,6 +57,16 @@ class Detect(Node):
         # -----------------------------
         self.csv_path = "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
         data = np.loadtxt(self.csv_path, delimiter=",")
+        track_data =  np.loadtxt("./korea.csv", 
+                                    delimiter=",", comments="#")
+        self.bound_x = track_data[:, 0]
+        self.bound_y = track_data[:, 1]
+        self.bound_d_right = track_data[:, 2]
+        self.bound_d_left = track_data[:, 3]
+
+        dx = np.diff(self.bound_x)
+        dy = np.diff(self.bound_y)
+        self.s_bounds = np.concatenate([[0], np.cumsum(np.hypot(dx, dy))])
         # --- TEMPORARY DEBUG ---
         data = np.loadtxt(self.csv_path, delimiter=",")
         #print(f"Raw raceline first point: {data[0,0]:.3f}, {data[0,1]:.3f}")
@@ -89,12 +99,14 @@ class Detect(Node):
         self.eps = 0.2
         self.min_samples = 3
         self.max_range = 5.0
-        self.track_half_width = 1.8
+        #self.track_half_width = 0.3 - using proper look up to get track-width, not unifrm width everywhere.
         self.match_threshold = 0.5
         self.max_age = 0.5
         self.max_obs_size = 0.5   # max physical size in metres (car ~0.3m wide)
         self.min_obs_size = 5    # min number of points to be a valid cluster
- 
+        self.boundary_inflation = 0.3
+
+
         # -----------------------------
         # TRACKING STATE
         # -----------------------------
@@ -107,7 +119,9 @@ class Detect(Node):
         self.create_timer(1.0, self.publish_raceline)
  
         self.get_logger().info("Detect node ready!")
- 
+    
+
+
     # -----------------------------
     # RECTANGLE FITTING (ETH method)
     # -----------------------------
@@ -180,6 +194,20 @@ class Detect(Node):
         ds = min(ds, self.track_length - ds)
         dd = d1 - d2
         return np.sqrt(ds**2 + dd**2)
+    
+    def get_track_width_at_s(self, s):
+        # Find the closest waypoint index by s
+        #s_array = np.array(self.converter.waypoints_s) 
+        #idx = np.argmin(np.abs(s_array - s))
+        #return self.bound_d_right[idx], self.bound_d_left[idx]
+
+        # using the boundary csv file to get s_array
+
+        idx = np.argmin(np.abs(self.s_bounds - s))
+        d_right = self.bound_d_right[idx] - self.boundary_inflation
+        d_left = self.bound_d_left[idx] - self.boundary_inflation
+        return d_right,d_left
+
     # -----------------------------
     # PUBLISH RACELINE BOUNDARY
     # -----------------------------
@@ -231,16 +259,18 @@ class Detect(Node):
  
             perp_x = -np.sin(psi[i])
             perp_y = np.cos(psi[i])
- 
+            d_right = self.bound_d_right[i % len(self.bound_d_right)] - self.boundary_inflation
+            d_left = self.bound_d_left[i % len(self.bound_d_left)] - self.boundary_inflation
+
             pl = Point()
-            pl.x = float(x[i] + self.track_half_width * perp_x)
-            pl.y = float(y[i] + self.track_half_width * perp_y)
+            pl.x = float(x[i] + d_left * perp_x)
+            pl.y = float(y[i] + d_left * perp_y)
             pl.z = 0.0
             left_marker.points.append(pl)
  
             pr = Point()
-            pr.x = float(x[i] - self.track_half_width * perp_x)
-            pr.y = float(y[i] - self.track_half_width * perp_y)
+            pr.x = float(x[i] - d_right * perp_x)
+            pr.y = float(y[i] - d_right * perp_y)
             pr.z = 0.0
             right_marker.points.append(pr)
  
@@ -391,7 +421,8 @@ class Detect(Node):
             #    f's={s_center:.2f} d={d_center:.2f}')
  
             # Track boundary filter
-            if abs(d_center) > self.track_half_width:
+            d_right, d_left = self.get_track_width_at_s(s_center)
+            if d_center < -d_right or d_center > d_left:
                 #self.get_logger().info(
                 #    f'  -> REJECTED by track_half_width (d={d_center:.2f})')
                 continue

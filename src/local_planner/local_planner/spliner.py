@@ -6,6 +6,7 @@ from geometry_msgs.msg import PoseStamped
 from scipy.interpolate import CubicSpline
 import os
 from .frenet_converter import FrenetConverter
+from f110_msgs.msg import ObstacleArray, Obstacle, WpntArray, Wpnt
 
 class SplinerNode(Node):
     def __init__(self):
@@ -58,23 +59,22 @@ class SplinerNode(Node):
 
         # Pubs & Subs
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
-        #subscribe to ObstacleArray when possible
-        # self.obstacle_sub = self.create_subscription(Obstacles, "/obstacles", self.obstacle_callback, 10)
+        self.obstacle_sub = self.create_subscription(ObstacleArray, "/obstacles", self.obstacle_callback, 10)
         self.path_pub = self.create_publisher(Path, self.local_path_topic, 10)
         self.get_logger().info("Spliner Node initialized and waiting for Odometry...")
 
-    # def obstacle_callback(self, msg):
-    #     self.obstacles = msg.obstacles
+    def obstacle_callback(self, msg):
+        self.obstacles = msg.obstacles
     
     def filter_obstacles(self, all_obstacles, ego_s, lookahead_dist=10.0):
         close_obstacles = []
         for obs in all_obstacles:
-            dist_s = (obs.s - ego_s) % self.track_length 
+            dist_s = (obs.s_center - ego_s) % self.track_length 
             
-            if dist_s < lookahead_dist and abs(obs.d) < self.obs_threshold:
+            if dist_s < lookahead_dist and abs(obs.d_center) < self.obs_threshold:
                 close_obstacles.append(obs)
                 
-        return min(close_obstacles, key=lambda o: (o.s - ego_s) % self.track_length) if close_obstacles else None
+        return min(close_obstacles, key=lambda o: (o.s_center - ego_s) % self.track_length) if close_obstacles else None
 
     def decide_evasive_side(self, obstacle, nearest_wpnt):
         buffer = self.evasion_dist
@@ -135,7 +135,7 @@ class SplinerNode(Node):
         target_obs = self.filter_obstacles(self.obstacles, ego_s)
 
         if target_obs:
-            obs_x, obs_y = self.frenet_converter.get_cartesian(target_obs.s, 0.0)
+            obs_x, obs_y = self.frenet_converter.get_cartesian(target_obs.s_center, 0.0)
             
             dists = np.linalg.norm(self.waypoints[:, :2] - np.array([obs_x, obs_y]), axis=1)
             nearest_idx = np.argmin(dists)
@@ -149,7 +149,7 @@ class SplinerNode(Node):
             
             side, d_apex = self.decide_evasive_side(target_obs, nearest_wpnt)
             
-            s_apex = target_obs.s
+            s_apex = target_obs.s_center
             if s_apex < ego_s:
                 s_apex += self.track_length
                 

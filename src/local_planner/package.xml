@@ -10,6 +10,7 @@
   <depend>rclpy</depend>
   <depend>nav_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>f110_msgs</depend>
   <depend>python3-numpy</depend>
   <depend>python3-scipy</depend>
 

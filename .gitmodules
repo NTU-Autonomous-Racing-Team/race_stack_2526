@@ -1,3 +1,6 @@
 [submodule "src/f1tenth_gym_ros"]
 	path = src/f1tenth_gym_ros
 	url = https://github.com/NTU-Autonomous-Racing-Team/f1tenth_gym_ros
+[submodule "src/F1Tenth_Hackathon_Evaluation"]
+	path = src/F1Tenth_Hackathon_Evaluation
+	url = https://github.com/NTU-Autonomous-Racing-Team/F1Tenth_Hackathon_Evaluation

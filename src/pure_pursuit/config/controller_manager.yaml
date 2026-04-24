@@ -25,16 +25,4 @@ controller_manager_node:
     steering_limit:       25.0       # degrees
     velocity_percentage:  1.2
 
-    # -------------------------------------------------------
-    # GB_TRACK Transition
-    # -------------------------------------------------------
-    transition_d_threshold:    0.1   # metres lateral offset to consider "on raceline"
-    transition_s_threshold:    1.0   # metres ahead/behind nearest waypoint
-    transition_frames_required: 30   # consecutive frames needed before leaving transition
     max_steering_rate:         0.15  # max radians the wheels can turn per frame
-
-    # -------------------------------------------------------
-    # Obstacle / Clearance Check
-    # -------------------------------------------------------
-    clearance_distance:   1.5        # metres ahead that must be clear
-    safe_corridor_width:  0.45       # car width + safety margin (metres)

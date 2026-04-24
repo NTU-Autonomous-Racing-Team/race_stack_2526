@@ -90,7 +90,8 @@ class Detect(Node):
         self.eps = 0.2
         self.min_samples = 3
         self.max_range = 5.0
-        self.track_half_width = 1.8
+        self.declare_parameter('track_half_width', 0.5)
+        self.track_half_width = float(self.get_parameter('track_half_width').value)
         self.match_threshold = 0.5
         self.max_age = 0.5
         self.max_obs_size = 0.5   # max physical size in metres (car ~0.3m wide)
@@ -102,9 +103,6 @@ class Detect(Node):
         self.tracked = []
         self.next_id = 0
 
-        # Build raceline markers once; timer callback only stamps/publishes.
-        self.raceline_markers = self._build_raceline_markers(x, y, psi)
- 
         # -----------------------------
         # RACELINE TIMER
         # -----------------------------
@@ -247,6 +245,12 @@ class Detect(Node):
 
     def publish_raceline(self):
         stamp = self.get_clock().now().to_msg()
+        self.track_half_width = float(self.get_parameter('track_half_width').value)
+        self.raceline_markers = self._build_raceline_markers(
+            self.converter.waypoints_x,
+            self.converter.waypoints_y,
+            self.converter.waypoints_psi,
+        )
         for marker in self.raceline_markers.markers:
             marker.header.stamp = stamp
         point_count = len(self.raceline_markers.markers[0].points)

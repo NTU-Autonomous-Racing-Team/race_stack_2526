@@ -37,8 +37,6 @@ class ControllerManager(Node):
         self.declare_parameter("velocity_percentage", 1.0)
         self.declare_parameter("wheelbase", 0.33)
         self.declare_parameter("local_waypoints_window", 100)
-        self.declare_parameter("transition_d_threshold", 0.1)  # meters lateral offset
-        self.declare_parameter("transition_s_threshold", 1.0)  # meters ahead/behind nearest waypoint
         self.declare_parameter("reverse_waypoints", False) # Reverse the waypoints to drive in anticlockwise direction
         
         self.path = self.get_parameter("waypoints_path").value
@@ -90,21 +88,10 @@ class ControllerManager(Node):
 
         self.get_logger().info("Pure Pursuit Node Started")
 
-    ### --- Safe Transition to GB_TRACK Parameters --- ###
         self.declare_parameter("max_steering_rate", 0.15) # Max radians the wheels can turn per frame
         self.max_steer_rate = self.get_parameter("max_steering_rate").value
         self.last_steering_angle = 0.0
-
-        self.declare_parameter("transition_frames_required", 30) # Number of consecutive frames needed
-        self.required_frames = self.get_parameter("transition_frames_required").value
-        self.consecutive_valid_frames = 0
-
-        self.declare_parameter("clearance_distance", 1.5) # Meters ahead that must be clear
-        self.declare_parameter("safe_corridor_width", 0.45) # Width of the car + safety margin
-        
-        self.in_transition = False
         self.has_initialized_idx = False
-    ### --- END OF TRANSITION PARAMETERS --- ###
 
     ### ---- OPPONENT CAR IN SIM ---- ###
         self.declare_parameter("opp_odom_topic", "/opp_racecar/odom")
@@ -163,17 +150,9 @@ class ControllerManager(Node):
             self.get_logger().warn(f"Received unknown state: {msg.data}")
             return
 
-        if incoming_state != self.current_state:            
-            # Entering GB_TRACK from another state — use FTG as bridge
-            if incoming_state == DriveState.GB_TRACK and self.current_state != DriveState.GB_TRACK:
-                self.in_transition = True
-                # self.get_logger().info("Transition to GB_TRACK: using FTG until on raceline")
-                
-            if incoming_state == DriveState.GB_TRACK:
-                self.ftg_logic.prev_steering = 0.0
-                
-            # Safely update the state to the Enum
-            self.current_state = incoming_state
+        if incoming_state != self.current_state and incoming_state == DriveState.GB_TRACK:
+            self.ftg_logic.prev_steering = 0.0
+        self.current_state = incoming_state
     
     def scan_callback(self, msg):
         self.latest_scan = msg
@@ -197,77 +176,14 @@ class ControllerManager(Node):
 
         self.curr_velocity = msg.twist.twist.linear.x
         
-        if self.current_state == DriveState.FTGONLY:
+        if self.current_state in (DriveState.FTGONLY, DriveState.TRANSITION):
             self.execute_ftg_logic()
-            return
-
-        # Bridge: use FTG until back on raceline
-        elif self.current_state == DriveState.GB_TRACK and self.in_transition:
-            self.execute_transition_logic(msg)
             return
 
         self.execute_pure_pursuit_logic(msg)
 
         #self.get_logger().info(f"Current Velocity: {self.curr_velocity:.2f} m/s", throttle_duration_sec=1.0)
     
-    ### --- SAFE TRANSITION BETWEEN ANY STATE AND GB_TRACK--- ###
-
-    ### Check no obstacles in a corridor ahead before allowing transition to GB_TRACK. 
-    ### To prevent the controller from trying to follow the raceline when it's unsafe to do so.
-    def is_path_clear(self):
-        if self.latest_scan is None:
-            return False 
-
-        clear_dist = self.get_parameter("clearance_distance").value
-        half_width = self.get_parameter("safe_corridor_width").value / 2.0
-
-        ranges = np.array(self.latest_scan.ranges)
-        
-        # Calculate the angle for every ray in the scan
-        angles = np.linspace(
-            self.latest_scan.angle_min,
-            self.latest_scan.angle_max,
-            len(ranges)
-        )
-
-        # Filter: We only care about the front half of the LiDAR (-90 to +90 degrees)
-        front_mask = (angles > -np.pi/2) & (angles < np.pi/2)
-        front_ranges = ranges[front_mask]
-        front_angles = angles[front_mask]
-
-        # Ignore inf and nan values
-        valid_mask = np.isfinite(front_ranges)
-        front_ranges = front_ranges[valid_mask]
-        front_angles = front_angles[valid_mask]
-
-        if len(front_ranges) == 0:
-            return True
-
-        # Convert polar (range, angle) to local cartesian (x forward, y lateral)
-        xs = front_ranges * np.cos(front_angles)
-        ys = front_ranges * np.sin(front_angles)
-
-        # Check if any LiDAR points fall inside our forward safety corridor
-        # x must be between 0.1m and clear_dist, y must be within the car's width
-        in_corridor = (xs > 0.1) & (xs < clear_dist) & (np.abs(ys) < half_width)
-
-        if np.any(in_corridor):
-            return False
-
-        return True
-
-    ### Check if we're close enough to the raceline (in d) to consider ourselves "on" it for transition purposes.
-    def is_on_raceline(self, car_x, car_y):
-        frenet = self.frenet_converter.get_frenet(
-            np.array([car_x]), np.array([car_y])
-        )
-        s = float(frenet[0][0])
-        d = float(frenet[1][0])  # lateral offset from raceline
-
-        d_ok = abs(d) < self.get_parameter("transition_d_threshold").value
-        return d_ok
-
-    ### --- END OF SAFE TRANSITION LOGIC --- ###
 
     def execute_ftg_logic(self):
         if self.latest_scan is None:
@@ -305,14 +221,14 @@ class ControllerManager(Node):
         ego_frenet = self.frenet_converter.get_frenet(np.array([car_x]), np.array([car_y]))
         ego_s = float(ego_frenet[0][0])
         if self.current_state == DriveState.TRAILING and self.opp_controller.opponent_data is not None:
-            target_vel = self.execute_trailing_logic(msg, target_vel)
+            target_vel = self.execute_trailing_logic(ego_s, target_vel)
         else:
             self.pure_pursuit_logic_copy.i_gap = 0.0  # reset integrator when not trailing
         ### --- End of Trailing Logic --- ###
 
         self.publish_drive(steer, target_vel)
 
-    def execute_trailing_logic(self, msg, global_speed_limit):
+    def execute_trailing_logic(self, ego_s, global_speed_limit):
         opp_frenet = self.frenet_converter.get_frenet(
             np.array([self.opp_controller.opponent_data['x']]),
             np.array([self.opp_controller.opponent_data['y']])
@@ -328,65 +244,6 @@ class ControllerManager(Node):
             self.track_length
         )
         return target_vel
-
-    def execute_transition_logic(self, msg):
-        car_x = msg.pose.pose.position.x
-        car_y = msg.pose.pose.position.y
-        car_yaw = self.get_yaw_from_quat(msg.pose.pose.orientation)
-        path_clear = self.is_path_clear()
-        on_raceline = self.is_on_raceline(car_x, car_y)
-        if not path_clear:
-            # Obstacle nearby — plain FTG, avoid first
-            self.consecutive_valid_frames = 0
-            self.execute_ftg_logic()
-            return
-        # Path is clear — always use goal-directed FTG to pull toward raceline
-        distances = np.linalg.norm(
-            self.waypoints[:, :2] - np.array([car_x, car_y]), axis=1
-        )
-        closest_idx = int(np.argmin(distances))
-        # Also update current_idx so PP is ready when transition ends
-        self.pure_pursuit_logic_copy.current_idx = closest_idx
-        # Use waypoints_s at closest_idx as the seed s
-        seed_s = float(self.frenet_converter.waypoints_s[closest_idx])
-        # Pass seed_s directly to get_frenet to force correct segment
-        frenet = self.frenet_converter.get_frenet(
-            np.array([car_x]), np.array([car_y]),
-            s=np.array([seed_s])  # ← constrain projection to correct segment
-        )
-        d = float(frenet[1][0])
-        next_idx = (closest_idx + 1) % len(self.waypoints)
-        raceline_heading = np.arctan2(
-            self.waypoints[next_idx, 1] - self.waypoints[closest_idx, 1],
-            self.waypoints[next_idx, 0] - self.waypoints[closest_idx, 0]
-        )
-        heading_error = (raceline_heading - car_yaw + np.pi) % (2 * np.pi) - np.pi
-        lateral_correction = np.arctan2(-d, 2.0)
-        target_angle = lateral_correction + 0.5 * heading_error
-        speed, steer = self.ftg_logic.process_lidar(self.latest_scan, target_angle=target_angle)
-        
-        # self.get_logger().info(
-            #     f"d={d:.3f} "
-            #     f"raceline_heading={np.degrees(raceline_heading):.1f} "
-            #     f"car_yaw={np.degrees(car_yaw):.1f} "
-            #     f"heading_err={np.degrees(heading_error):.1f} "
-            #     f"lat_corr={np.degrees(lateral_correction):.1f} "
-            #     f"target_angle={np.degrees(target_angle):.1f}"
-            # )
-        self.publish_drive(steer, speed)
-        if on_raceline:
-            self.consecutive_valid_frames += 1
-            # Ensure the car stays on the raceline long enough before switching to pure pursuit
-            if self.consecutive_valid_frames >= self.required_frames:
-                self.in_transition = False
-                self.consecutive_valid_frames = 0
-                self.get_logger().info("Transition complete — resuming Pure Pursuit")
-                return
-        else:
-            #if self.consecutive_valid_frames > 0:
-                # self.get_logger().info("Transition streak reset")
-            self.consecutive_valid_frames = 0
-            return  # still off raceline, stay in transition next frame
 
     def publish_drive(self, steer, vel):
         # 1. Calculate how much the algorithm WANTS to change the steering

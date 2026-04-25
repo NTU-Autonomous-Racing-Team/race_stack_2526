@@ -10,10 +10,10 @@ source /home/autodrive_devkit/install/setup.bash
 cd /home/autodrive_devkit
 
 # Launch AutoDRIVE Devkit with GUI
-# ros2 launch autodrive_roboracer bringup_graphics.launch.py
+ros2 launch autodrive_roboracer bringup_graphics.launch.py
 
 # Launch AutoDRIVE Devkit Headless
-ros2 launch autodrive_roboracer bringup_headless.launch.py
+# ros2 launch autodrive_roboracer bringup_headless.launch.py
 
 # echo "Ensure the F1Tenth simulator is already running."
 # echo "Launching evaluation..."

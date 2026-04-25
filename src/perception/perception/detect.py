@@ -56,7 +56,7 @@ class Detect(Node):
         # -----------------------------
         # LOAD TRACK CSV
         # -----------------------------
-        self.csv_path = "./src/pure_pursuit/racelines/korea_mintime_sparse.csv"
+        self.csv_path = "./src/pure_pursuit/racelines/porto.csv"
         data = np.loadtxt(self.csv_path, delimiter=",")
         # --- TEMPORARY DEBUG ---
         data = np.loadtxt(self.csv_path, delimiter=",")
@@ -76,7 +76,9 @@ class Detect(Node):
         # ROS SETUP
         # -----------------------------
         self.declare_parameter('scan_topic', '/autodrive/roboracer_1/lidar')
+        self.declare_parameter('tracking_frame', 'world')
         self.scan_topic = self.get_parameter('scan_topic').value
+        self.tracking_frame = self.get_parameter('tracking_frame').value
         self.scan_sub = self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos_profile_sensor_data)
         self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
@@ -190,7 +192,7 @@ class Detect(Node):
     # -----------------------------
     def _build_raceline_markers(self, x, y, psi):
         center_marker = Marker()
-        center_marker.header.frame_id = 'map'
+        center_marker.header.frame_id = self.tracking_frame
         center_marker.ns = 'raceline'
         center_marker.id = 0
         center_marker.type = Marker.LINE_STRIP
@@ -200,7 +202,7 @@ class Detect(Node):
         center_marker.color.g = 1.0
  
         left_marker = Marker()
-        left_marker.header.frame_id = 'map'
+        left_marker.header.frame_id = self.tracking_frame
         left_marker.ns = 'raceline'
         left_marker.id = 1
         left_marker.type = Marker.LINE_STRIP
@@ -211,7 +213,7 @@ class Detect(Node):
         left_marker.color.g = 1.0
  
         right_marker = Marker()
-        right_marker.header.frame_id = 'map'
+        right_marker.header.frame_id = self.tracking_frame
         right_marker.ns = 'raceline'
         right_marker.id = 2
         right_marker.type = Marker.LINE_STRIP
@@ -267,7 +269,7 @@ class Detect(Node):
  
         # Clear prior obstacle markers on every cycle so RViz shows only active obstacles.
         clear_marker = Marker()
-        clear_marker.header.frame_id = 'map'
+        clear_marker.header.frame_id = self.tracking_frame
         clear_marker.header.stamp = self.get_clock().now().to_msg()
         clear_marker.ns = 'obstacles'
         clear_marker.action = Marker.DELETEALL
@@ -276,7 +278,7 @@ class Detect(Node):
         for t in active_tracks:
             xy = self.converter.get_cartesian(t.s, t.d)
             marker = Marker()
-            marker.header.frame_id = 'map'
+            marker.header.frame_id = self.tracking_frame
             marker.header.stamp = self.get_clock().now().to_msg()
             marker.ns = 'obstacles'
             marker.id = t.id
@@ -306,7 +308,7 @@ class Detect(Node):
  
         try:
             transform = self.tf_buffer.lookup_transform(
-                'map',
+                self.tracking_frame,
                 scan.header.frame_id,
                 Time(),
                 timeout=Duration(seconds=0.01)

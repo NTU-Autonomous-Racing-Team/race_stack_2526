@@ -27,7 +27,7 @@ class StateMachine(Node):
         # Longitudinal trigger window in Frenet s (meters) around the car.
         self.declare_parameter('trigger_distance', 3.0)
         # Raceline used for transition-completion checks.
-        self.declare_parameter('waypoints_path', './src/pure_pursuit/racelines/korea_mintime_sparse.csv')
+        self.declare_parameter('waypoints_path', './src/pure_pursuit/racelines/porto.csv')
         # Transition completion thresholds.
         self.declare_parameter('transition_frames_required', 30)
         self.declare_parameter('transition_d_threshold', 0.1)

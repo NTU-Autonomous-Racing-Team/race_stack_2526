@@ -27,7 +27,7 @@ class ControllerManager(Node):
     def __init__(self):
         super().__init__('controller_manager_node')
 
-        self.declare_parameter("waypoints_path", "./src/pure_pursuit/racelines/korea_mintime_sparse.csv")
+        self.declare_parameter("waypoints_path", "./src/pure_pursuit/racelines/porto.csv")
         self.declare_parameter("odom_topic", "/autodrive/roboracer_1/odom")
         self.declare_parameter("scan_topic", "/autodrive/roboracer_1/lidar")
         self.declare_parameter("throttle_command_topic", "/autodrive/roboracer_1/throttle_command")

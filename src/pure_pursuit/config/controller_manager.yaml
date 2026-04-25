@@ -10,9 +10,12 @@ controller_manager_node:
     # -------------------------------------------------------
     # Topics
     # -------------------------------------------------------
-    odom_topic:      "/ego_racecar/odom"
+    odom_topic:      "/autodrive/roboracer_1/odom"
+    scan_topic:      "/autodrive/roboracer_1/lidar"
     opp_odom_topic:  "/opp_racecar/odom"
-    drive_topic:     "/drive"
+    throttle_command_topic: "/autodrive/roboracer_1/throttle_command"
+    steering_command_topic: "/autodrive/roboracer_1/steering_command"
+    max_speed_mps:   3.0
     opp_drive_topic:  "/opp_drive"
     # -------------------------------------------------------
     # Pure Pursuit

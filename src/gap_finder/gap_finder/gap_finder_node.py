@@ -3,7 +3,7 @@ from rclpy.node import Node
 
 import numpy as np
 from sensor_msgs.msg import LaserScan
-from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
+from std_msgs.msg import Float32
 from std_msgs.msg import String
 from state_machine.drive_state import DriveState
 
@@ -15,14 +15,16 @@ class GapFinderNode(Node):
     def __init__(self):
         super().__init__('reactive_node')
         # Topics & Subs, Pubs
-        lidarscan_topic = '/scan'
-        drive_topic = '/drive'
+        lidarscan_topic = '/autodrive/roboracer_1/lidar'
+        throttle_topic = '/autodrive/roboracer_1/throttle_command'
+        steering_topic = '/autodrive/roboracer_1/steering_command'
 
         # TODO: Subscribe to LIDAR
         self.subscription = self.create_subscription(LaserScan,lidarscan_topic,self.lidar_callback,10)
         self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
         # TODO: Publish to drive
-        self.publisher = self.create_publisher(AckermannDriveStamped,drive_topic,10)
+        self.throttle_pub = self.create_publisher(Float32, throttle_topic, 10)
+        self.steering_pub = self.create_publisher(Float32, steering_topic, 10)
         self.current_state = DriveState.GB_TRACK
 
         self.safety_bubble_diameter = 0.2
@@ -37,6 +39,8 @@ class GapFinderNode(Node):
         self.do_limit_fov = True
         self.do_mark_minimum = True
         self.do_mark_disparity = True
+        self.max_speed_mps = 3.0
+        self.max_steer_rad = 0.4189
 
     def state_callback(self, msg):
         try:
@@ -137,24 +141,26 @@ class GapFinderNode(Node):
         return ackermann
 
     def lidar_callback(self, scan_msg):
-        """ Process each LiDAR scan as per the Follow Gap algorithm & publish an AckermannDriveStamped Message
-        """
+        """Process each LiDAR scan and publish AutoDRIVE control commands."""
         if self.current_state != DriveState.FTGONLY:
             return
 
         drive = self.update(scan_msg)
-        drive_msg = AckermannDriveStamped()
-
-        drive_msg.header.stamp = self.get_clock().now().to_msg()
-        drive_msg.header.frame_id = "drive"
 
         #Clipping steering
         steering = drive["steering"]
-        steering = max(min(steering, 0.4189), -0.4189)
+        steering = max(min(steering, self.max_steer_rad), -self.max_steer_rad)
 
-        drive_msg.drive.speed = float(drive["speed"])
-        drive_msg.drive.steering_angle = float(steering)
-        self.publisher.publish(drive_msg)
+        throttle_cmd = float(np.clip(drive["speed"] / self.max_speed_mps, -1.0, 1.0))
+        steering_cmd = float(np.clip(steering / self.max_steer_rad, -1.0, 1.0))
+
+        throttle_msg = Float32()
+        throttle_msg.data = throttle_cmd
+        steering_msg = Float32()
+        steering_msg.data = steering_cmd
+
+        self.throttle_pub.publish(throttle_msg)
+        self.steering_pub.publish(steering_msg)
 
         
 

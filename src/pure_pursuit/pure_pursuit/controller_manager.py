@@ -9,6 +9,7 @@ from nav_msgs.msg import Odometry, Path
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, PoseWithCovarianceStamped, PoseStamped
@@ -27,8 +28,11 @@ class ControllerManager(Node):
         super().__init__('controller_manager_node')
 
         self.declare_parameter("waypoints_path", "./src/pure_pursuit/racelines/korea_mintime_sparse.csv")
-        self.declare_parameter("odom_topic", "/ego_racecar/odom")
-        self.declare_parameter("drive_topic", "/drive")
+        self.declare_parameter("odom_topic", "/autodrive/roboracer_1/odom")
+        self.declare_parameter("scan_topic", "/autodrive/roboracer_1/lidar")
+        self.declare_parameter("throttle_command_topic", "/autodrive/roboracer_1/throttle_command")
+        self.declare_parameter("steering_command_topic", "/autodrive/roboracer_1/steering_command")
+        self.declare_parameter("max_speed_mps", 3.0)
         self.declare_parameter("min_lookahead", 0.6)#0.4#2.0 #0.6
         self.declare_parameter("max_lookahead", 1.8)#4.0 #1.8
         self.declare_parameter("lookahead_ratio", 9.0)#8.0 #9 for copy
@@ -41,7 +45,10 @@ class ControllerManager(Node):
         
         self.path = self.get_parameter("waypoints_path").value
         self.odom_topic = self.get_parameter("odom_topic").value
-        self.drive_topic = self.get_parameter("drive_topic").value
+        self.scan_topic = self.get_parameter("scan_topic").value
+        self.throttle_command_topic = self.get_parameter("throttle_command_topic").value
+        self.steering_command_topic = self.get_parameter("steering_command_topic").value
+        self.max_speed_mps = float(self.get_parameter("max_speed_mps").value)
         self.min_la = self.get_parameter("min_lookahead").value
         self.max_la = self.get_parameter("max_lookahead").value
         self.la_ratio = self.get_parameter("lookahead_ratio").value
@@ -74,9 +81,10 @@ class ControllerManager(Node):
         self.latest_scan = None
 
         # 3. Pubs & Subs
-        self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 10)
+        self.throttle_pub = self.create_publisher(Float32, self.throttle_command_topic, 10)
+        self.steering_pub = self.create_publisher(Float32, self.steering_command_topic, 10)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.scan_sub = self.create_subscription(LaserScan, self.scan_topic, self.scan_callback, 10)
         self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
 
         self.viz_pub = self.create_publisher(Marker, '/waypoint_markers', 10)
@@ -255,10 +263,21 @@ class ControllerManager(Node):
         # 4. Save for the next frame
         self.last_steering_angle = smoothed_steer
 
-        drive_msg = AckermannDriveStamped()
-        drive_msg.drive.speed = float(vel)
-        drive_msg.drive.steering_angle = float(smoothed_steer)
-        self.drive_pub.publish(drive_msg)
+        throttle_cmd = 0.0
+        if self.max_speed_mps > 1e-6:
+            throttle_cmd = np.clip(float(vel) / self.max_speed_mps, -1.0, 1.0)
+
+        steering_cmd = 0.0
+        if self.steer_limit > 1e-6:
+            steering_cmd = np.clip(float(smoothed_steer) / self.steer_limit, -1.0, 1.0)
+
+        throttle_msg = Float32()
+        throttle_msg.data = float(throttle_cmd)
+        steering_msg = Float32()
+        steering_msg.data = float(steering_cmd)
+
+        self.throttle_pub.publish(throttle_msg)
+        self.steering_pub.publish(steering_msg)
 
     def visualize_lookahead_point(self, point):
         """

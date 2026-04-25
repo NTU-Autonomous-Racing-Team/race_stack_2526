@@ -75,7 +75,9 @@ class Detect(Node):
         # -----------------------------
         # ROS SETUP
         # -----------------------------
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_cb, qos_profile_sensor_data)
+        self.declare_parameter('scan_topic', '/autodrive/roboracer_1/lidar')
+        self.scan_topic = self.get_parameter('scan_topic').value
+        self.scan_sub = self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos_profile_sensor_data)
         self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
         self.raceline_pub = self.create_publisher(MarkerArray, '/raceline_marker', 10)

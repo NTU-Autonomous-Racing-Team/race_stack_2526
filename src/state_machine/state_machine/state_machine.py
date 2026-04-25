@@ -36,7 +36,9 @@ class StateMachine(Node):
         # RViz marker topic for live state text.
         self.declare_parameter('state_marker_topic', '/state_marker')
         # TF frame where state text is displayed.
-        self.declare_parameter('state_marker_frame', 'ego_racecar/base_link')
+        self.declare_parameter('state_marker_frame', 'roboracer_1')
+        self.declare_parameter('scan_topic', '/autodrive/roboracer_1/lidar')
+        self.declare_parameter('odom_topic', '/autodrive/roboracer_1/odom')
         self.obs_topic = self.get_parameter('obs_topic').value
         self.safety_lateral_distance = float(self.get_parameter('safety_lateral_distance').value)
         self.trigger_distance = float(self.get_parameter('trigger_distance').value)
@@ -47,6 +49,8 @@ class StateMachine(Node):
         self.safe_corridor_half_width = float(self.get_parameter('safe_corridor_width').value) / 2.0
         self.state_marker_topic = self.get_parameter('state_marker_topic').value
         self.state_marker_frame = self.get_parameter('state_marker_frame').value
+        self.scan_topic = self.get_parameter('scan_topic').value
+        self.odom_topic = self.get_parameter('odom_topic').value
         self.latest_scan = None
         self.latest_odom = None
         self.transition_valid_frames = 0
@@ -67,13 +71,13 @@ class StateMachine(Node):
         )
         self.scan_sub = self.create_subscription(
             LaserScan,
-            '/scan',
+            self.scan_topic,
             self.scan_callback,
             qos_profile_sensor_data,
         )
         self.odom_sub = self.create_subscription(
             Odometry,
-            '/ego_racecar/odom',
+            self.odom_topic,
             self.odom_callback,
             qos_profile_sensor_data,
         )

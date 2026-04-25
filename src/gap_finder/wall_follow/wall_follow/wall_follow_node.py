@@ -4,7 +4,7 @@ from rclpy.node import Node
 
 import numpy as np
 from sensor_msgs.msg import LaserScan
-from ackermann_msgs.msg import AckermannDriveStamped
+from std_msgs.msg import Float32
 
 class WallFollow(Node):
     """ 
@@ -14,8 +14,9 @@ class WallFollow(Node):
         super().__init__('wall_follow_node')
         self.get_logger().info("!!!!!!!! 這是 2026 版本 !!!!!!!!")
 
-        lidarscan_topic = '/scan'
-        drive_topic = '/drive'
+        lidarscan_topic = '/autodrive/roboracer_1/lidar'
+        throttle_topic = '/autodrive/roboracer_1/throttle_command'
+        steering_topic = '/autodrive/roboracer_1/steering_command'
 
         # TODO: create subscribers and publishers
         self.subscription = self.create_subscription(
@@ -23,10 +24,8 @@ class WallFollow(Node):
             lidarscan_topic, 
             self.scan_callback, 
             10)
-        self.publisher_ = self.create_publisher(
-            AckermannDriveStamped, 
-            drive_topic, 
-            10)
+        self.throttle_pub = self.create_publisher(Float32, throttle_topic, 10)
+        self.steering_pub = self.create_publisher(Float32, steering_topic, 10)
         
         # TODO: set PID gains
         self.kp = 1
@@ -41,6 +40,8 @@ class WallFollow(Node):
         # TODO: store any necessary values you think you'll need
         self.lookahead = 0.5
         self.desired_dist = 1
+        self.max_speed_mps = 3.0
+        self.max_steer_rad = 0.4
 
     def get_range(self, range_data, angle):
         """
@@ -106,11 +107,12 @@ class WallFollow(Node):
         steering_angle = self.kp*error + self.kd*derivative + self.ki*self.integral
         self.prev_error = error
         steering_angle = max(-0.4, min(steering_angle, 0.4))
-        drive_msg = AckermannDriveStamped()
-        # TODO: fill in drive message and publish
-        drive_msg.drive.speed = velocity
-        drive_msg.drive.steering_angle = steering_angle
-        self.publisher_.publish(drive_msg)
+        throttle_msg = Float32()
+        steering_msg = Float32()
+        throttle_msg.data = float(np.clip(velocity / self.max_speed_mps, -1.0, 1.0))
+        steering_msg.data = float(np.clip(steering_angle / self.max_steer_rad, -1.0, 1.0))
+        self.throttle_pub.publish(throttle_msg)
+        self.steering_pub.publish(steering_msg)
 
     def scan_callback(self, msg):
         """

@@ -1,11 +1,11 @@
 particle_filter:
   ros__parameters:
     # topic names
-    scan_topic: '/scan'
-    odometry_topic: '/ego_racecar/odom'
+    scan_topic: '/autodrive/roboracer_1/lidar'
+    odometry_topic: '/autodrive/roboracer_1/odom'
     map_frame: 'map'
-    odom_frame: 'ego_racecar/odom'       
-    base_frame: 'ego_racecar/base_link'
+    odom_frame: 'world'
+    base_frame: 'roboracer_1'
     publish_odom: 1
     
     # range data downsampling

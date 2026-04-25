@@ -9,6 +9,14 @@
 
   <depend>rclpy</depend>
   <depend>frenet_conversion</depend>
+  <depend>ackermann_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>python3-numpy</depend>
   <exec_depend>state_machine</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

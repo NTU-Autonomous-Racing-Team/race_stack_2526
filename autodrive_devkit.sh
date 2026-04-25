@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+colcon build
 # Setup Development Environment
 source /opt/ros/humble/setup.bash
 source /home/autodrive_devkit/install/setup.bash

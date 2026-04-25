@@ -51,6 +51,27 @@ def generate_launch_description():
             output='screen',
         ),
         Node(
+            package='nav2_map_server',
+            executable='map_server',
+            name='map_server',
+            output='screen',
+            parameters=[{
+                'yaml_filename': os.path.join(os.getcwd(), 'porto.yaml'),
+                'topic_name': 'map',
+                'frame_id': 'world',
+            }],
+        ),
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_map',
+            output='screen',
+            parameters=[{
+                'autostart': True,
+                'node_names': ['map_server'],
+            }],
+        ),
+        Node(
             package='rviz2',
             executable='rviz2',
             name='rviz',

@@ -86,6 +86,9 @@ class ParticleFiler(Node):
         self.declare_parameter('motion_dispersion_theta')
         self.declare_parameter('scan_topic')
         self.declare_parameter('odometry_topic')
+        self.declare_parameter('map_frame')
+        self.declare_parameter('odom_frame')
+        self.declare_parameter('base_frame')
 
         # parameters
         self.ANGLE_STEP           = self.get_parameter('angle_step').value
@@ -99,6 +102,9 @@ class ParticleFiler(Node):
         self.SHOW_FINE_TIMING     = self.get_parameter('fine_timing').value
         self.PUBLISH_ODOM         = self.get_parameter('publish_odom').value
         self.DO_VIZ               = self.get_parameter('viz').value
+        self.MAP_FRAME            = self.get_parameter('map_frame').value
+        self.ODOM_FRAME           = self.get_parameter('odom_frame').value
+        self.BASE_FRAME           = self.get_parameter('base_frame').value
 
         # sensor model constants
         self.Z_SHORT   = self.get_parameter('z_short').value
@@ -130,6 +136,10 @@ class ParticleFiler(Node):
         self.first_sensor_update = True
         self.state_lock = Lock()
 
+        # Publish map->odom(world) TF as soon as the node starts so RViz can
+        # use map as fixed frame before localization has converged.
+        self.pub_tf = TransformBroadcaster(self)
+
         # cache this to avoid memory allocation in motion model
         self.local_deltas = np.zeros((self.MAX_PARTICLES, 3))
 
@@ -154,6 +164,9 @@ class ParticleFiler(Node):
         self.precompute_sensor_model()
         self.initialize_global()
 
+        # Seed TF tree with identity transform until filter updates it.
+        self.publish_tf(np.array([0.0, 0.0, 0.0]))
+
         # keep track of speed from input odom
         self.current_speed = 0.0
 
@@ -166,9 +179,6 @@ class ParticleFiler(Node):
 
         if self.PUBLISH_ODOM:
             self.odom_pub = self.create_publisher(Odometry, '/pf/pose/odom', 1)
-
-        # these topics are for coordinate space things
-        self.pub_tf = TransformBroadcaster(self)
 
         # these topics are to receive data from the racecar
         self.laser_sub = self.create_subscription(
@@ -185,6 +195,11 @@ class ParticleFiler(Node):
             PoseWithCovarianceStamped,
             '/initialpose',
             self.clicked_pose,
+            1)
+        self.goal_sub = self.create_subscription(
+            PoseStamped,
+            '/goal_pose',
+            self.goal_pose_cb,
             1)
         self.click_sub = self.create_subscription(
             PointStamped,
@@ -244,8 +259,8 @@ class ParticleFiler(Node):
         t = TransformStamped()
         # header
         t.header.stamp = stamp
-        t.header.frame_id = 'map'
-        t.child_frame_id = 'ego_racecar/odom'
+        t.header.frame_id = self.MAP_FRAME
+        t.child_frame_id = self.ODOM_FRAME
         # translation
         t.transform.translation.x = pose[0]
         t.transform.translation.y = pose[1]
@@ -258,10 +273,10 @@ class ParticleFiler(Node):
         t.transform.rotation.w = q[3]
         self.pub_tf.sendTransform(t)
         # also publish odometry to facilitate getting the localization pose
-        if self.PUBLISH_ODOM:
+        if self.PUBLISH_ODOM and hasattr(self, 'odom_pub'):
             odom = Odometry()
             odom.header.stamp = self.get_clock().now().to_msg()
-            odom.header.frame_id = 'map'
+            odom.header.frame_id = self.MAP_FRAME
             odom.pose.pose.position.x = pose[0]
             odom.pose.pose.position.y = pose[1]
             odom.pose.pose.orientation = Utils.angle_to_quaternion(pose[2])
@@ -283,7 +298,7 @@ class ParticleFiler(Node):
             # Publish the inferred pose for visualization
             ps = PoseStamped()
             ps.header.stamp = self.get_clock().now().to_msg()
-            ps.header.frame_id = 'map'
+            ps.header.frame_id = self.MAP_FRAME
             ps.pose.position.x = self.inferred_pose[0]
             ps.pose.position.y = self.inferred_pose[1]
             ps.pose.orientation = Utils.angle_to_quaternion(self.inferred_pose[2])
@@ -311,7 +326,7 @@ class ParticleFiler(Node):
         # publish the given particles as a PoseArray object
         pa = PoseArray()
         pa.header.stamp = self.get_clock().now().to_msg()
-        pa.header.frame_id = 'map'
+        pa.header.frame_id = self.MAP_FRAME
         pa.poses = Utils.particles_to_poses(particles)
         self.particle_pub.publish(pa)
 
@@ -319,7 +334,7 @@ class ParticleFiler(Node):
         # publish the given angels and ranges as a laser scan message
         ls = LaserScan()
         ls.header.stamp = self.last_stamp
-        ls.header.frame_id = 'ego_racecar/laser_model'
+        ls.header.frame_id = f'{self.BASE_FRAME}/laser_model'
         ls.angle_min = np.min(angles)
         ls.angle_max = np.max(angles)
         ls.angle_increment = np.abs(angles[0] - angles[1])
@@ -384,6 +399,12 @@ class ParticleFiler(Node):
             self.initialize_global()
         elif isinstance(msg, PoseWithCovarianceStamped):
             self.initialize_particles_pose(msg.pose.pose)
+
+    def goal_pose_cb(self, msg):
+        '''
+        Accept RViz 2D Goal Pose clicks as an alternative initialization input.
+        '''
+        self.initialize_particles_pose(msg.pose)
 
     def initialize_particles_pose(self, pose):
         '''

@@ -29,6 +29,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -48,6 +50,11 @@ def generate_launch_description():
             name='autodrive_bridge',
             emulate_tty=True,
             output='screen',
+        ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(get_package_share_directory('particle_filter'), 'launch', 'localize_launch.py')
+            )
         ),
         Node(
             package='state_machine',

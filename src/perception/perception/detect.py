@@ -6,7 +6,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32MultiArray
 from tf2_ros import Buffer, TransformListener
 from rclpy.time import Time, Duration
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy, qos_profile_sensor_data
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
  
@@ -82,7 +82,12 @@ class Detect(Node):
         self.scan_sub = self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos_profile_sensor_data)
         self.pub = self.create_publisher(Float32MultiArray, '/tracked_obstacles', 10)
         self.marker_pub = self.create_publisher(MarkerArray, '/obstacle_markers', 10)
-        self.raceline_pub = self.create_publisher(MarkerArray, '/raceline_marker', 10)
+        raceline_qos = QoSProfile(
+            depth=1,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            reliability=QoSReliabilityPolicy.RELIABLE,
+        )
+        self.raceline_pub = self.create_publisher(MarkerArray, '/raceline_marker', raceline_qos)
  
         # TF
         self.tf_buffer = Buffer()
@@ -258,7 +263,6 @@ class Detect(Node):
         for marker in self.raceline_markers.markers:
             marker.header.stamp = stamp
         point_count = len(self.raceline_markers.markers[0].points)
-        self.get_logger().info("Publishing raceline markers {} points".format(point_count))
         self.raceline_pub.publish(self.raceline_markers)
  
     # -----------------------------
@@ -274,6 +278,12 @@ class Detect(Node):
         clear_marker.ns = 'obstacles'
         clear_marker.action = Marker.DELETEALL
         marker_array.markers.append(clear_marker)
+
+        # Mirror raceline markers onto /obstacle_markers so a single RViz MarkerArray
+        # display can show both static track geometry and dynamic obstacles.
+        if hasattr(self, 'raceline_markers'):
+            for m in self.raceline_markers.markers:
+                marker_array.markers.append(m)
  
         for t in active_tracks:
             xy = self.converter.get_cartesian(t.s, t.d)

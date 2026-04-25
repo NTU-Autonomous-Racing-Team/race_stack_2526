@@ -42,7 +42,6 @@ def generate_launch_description():
             package='perception',
             executable='detect',
             name='detect',
-            parameters=[{'use_sim_time': True}],
             output='screen',
         )
 

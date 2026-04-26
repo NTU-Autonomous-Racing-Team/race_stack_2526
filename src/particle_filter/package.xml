@@ -13,6 +13,8 @@
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>range-libc-pip</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

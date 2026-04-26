@@ -316,9 +316,12 @@ class ParticleFiler(Node):
 
         if self.pub_fake_scan.get_subscription_count() > 0 and isinstance(self.ranges, np.ndarray):
             # generate the scan from the point of view of the inferred position for visualization
-            self.viz_queries[:,0] = self.inferred_pose[0]
-            self.viz_queries[:,1] = self.inferred_pose[1]
-            self.viz_queries[:,2] = self.downsampled_angles + self.inferred_pose[2]
+            # convert inferred pose from world to map coordinates for range_libc
+            inferred_map = np.array([self.inferred_pose[0], self.inferred_pose[1], self.inferred_pose[2]])
+            Utils.world_to_map(inferred_map.reshape(1, 3), self.map_info)
+            self.viz_queries[:,0] = inferred_map[0]
+            self.viz_queries[:,1] = inferred_map[1]
+            self.viz_queries[:,2] = self.downsampled_angles + inferred_map[2]
             self.range_method.calc_range_many(self.viz_queries, self.viz_ranges)
             self.publish_scan(self.downsampled_angles, self.viz_ranges)
 
@@ -546,9 +549,13 @@ class ParticleFiler(Node):
             self.tiled_angles = np.tile(self.downsampled_angles, self.MAX_PARTICLES)
             self.first_sensor_update = False
 
+        # Convert particles from world coordinates to map pixel coordinates for range_libc
+        proposal_dist_map = np.copy(proposal_dist)
+        Utils.world_to_map(proposal_dist_map, self.map_info)
+
         if self.RANGELIB_VAR == VAR_RADIAL_CDDT_OPTIMIZATIONS:
             if 'cddt' in self.WHICH_RM:
-                self.queries[:,:] = proposal_dist[:,:]
+                self.queries[:,:] = proposal_dist_map[:,:]
                 self.range_method.calc_range_many_radial_optimized(num_rays, self.downsampled_angles[0], self.downsampled_angles[-1], self.queries, self.ranges)
 
                 # evaluate the sensor model
@@ -558,14 +565,14 @@ class ParticleFiler(Node):
             else:
                 self.get_logger().info('Cannot use radial optimizations with non-CDDT based methods, use rangelib_variant 2')
         elif self.RANGELIB_VAR == VAR_REPEAT_ANGLES_EVAL_SENSOR_ONE_SHOT:
-            self.queries[:,:] = proposal_dist[:,:]
+            self.queries[:,:] = proposal_dist_map[:,:]
             self.range_method.calc_range_repeat_angles_eval_sensor_model(self.queries, self.downsampled_angles, obs, self.weights)
             np.power(self.weights, self.INV_SQUASH_FACTOR, self.weights)
         elif self.RANGELIB_VAR == VAR_REPEAT_ANGLES_EVAL_SENSOR:
             if self.SHOW_FINE_TIMING:
                 t_start = time.time()
             # this version demonstrates what this would look like with coordinate space conversion pushed to rangelib
-            self.queries[:,:] = proposal_dist[:,:]
+            self.queries[:,:] = proposal_dist_map[:,:]
             if self.SHOW_FINE_TIMING:
                 t_init = time.time()
             self.range_method.calc_range_repeat_angles(self.queries, self.downsampled_angles, self.ranges)
@@ -586,9 +593,9 @@ class ParticleFiler(Node):
         elif self.RANGELIB_VAR == VAR_CALC_RANGE_MANY_EVAL_SENSOR:
             # this version demonstrates what this would look like with coordinate space conversion pushed to rangelib
             # this part is inefficient since it requires a lot of effort to construct this redundant array
-            self.queries[:,0] = np.repeat(proposal_dist[:,0], num_rays)
-            self.queries[:,1] = np.repeat(proposal_dist[:,1], num_rays)
-            self.queries[:,2] = np.repeat(proposal_dist[:,2], num_rays)
+            self.queries[:,0] = np.repeat(proposal_dist_map[:,0], num_rays)
+            self.queries[:,1] = np.repeat(proposal_dist_map[:,1], num_rays)
+            self.queries[:,2] = np.repeat(proposal_dist_map[:,2], num_rays)
             self.queries[:,2] += self.tiled_angles
 
             self.range_method.calc_range_many(self.queries, self.ranges)
@@ -598,9 +605,9 @@ class ParticleFiler(Node):
             np.power(self.weights, self.INV_SQUASH_FACTOR, self.weights)
         elif self.RANGELIB_VAR == VAR_NO_EVAL_SENSOR_MODEL:
             # this version directly uses the sensor model in Python, at a significant computational cost
-            self.queries[:,0] = np.repeat(proposal_dist[:,0], num_rays)
-            self.queries[:,1] = np.repeat(proposal_dist[:,1], num_rays)
-            self.queries[:,2] = np.repeat(proposal_dist[:,2], num_rays)
+            self.queries[:,0] = np.repeat(proposal_dist_map[:,0], num_rays)
+            self.queries[:,1] = np.repeat(proposal_dist_map[:,1], num_rays)
+            self.queries[:,2] = np.repeat(proposal_dist_map[:,2], num_rays)
             self.queries[:,2] += self.tiled_angles
 
             # compute the ranges for all the particles in a single functon call

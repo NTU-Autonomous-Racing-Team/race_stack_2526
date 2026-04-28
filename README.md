@@ -16,6 +16,8 @@ bash setup_dep.sh
 ```
 This installs all required dependencies, and to run the actual race stack
 
+*It is advised that you use a VSCode terminal to run this, as port forwarding happens automatically with it*
+
 ```bash
 bash autodrive_devkit.sh
 ```

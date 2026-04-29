@@ -1,31 +1,30 @@
 controller_manager_node:
   ros__parameters:
-
     # -------------------------------------------------------
     # Waypoints
     # -------------------------------------------------------
-    waypoints_path: "./src/pure_pursuit/racelines/porto.csv"
-    reverse_waypoints: false         # Set true to drive anticlockwise
-    local_waypoints_window: 10          
+    waypoints_path: "./src/pure_pursuit/racelines/simracing26.csv"
+    reverse_waypoints: false # Set true to drive anticlockwise
+    local_waypoints_window: 10
     # -------------------------------------------------------
     # Topics
     # -------------------------------------------------------
-    odom_topic:      "/autodrive/roboracer_1/odom"
-    scan_topic:      "/autodrive/roboracer_1/lidar"
-    opp_odom_topic:  "/opp_racecar/odom"
+    odom_topic: "/autodrive/roboracer_1/odom"
+    scan_topic: "/autodrive/roboracer_1/lidar"
+    opp_odom_topic: "/opp_racecar/odom"
     throttle_command_topic: "/autodrive/roboracer_1/throttle_command"
     steering_command_topic: "/autodrive/roboracer_1/steering_command"
-    max_speed_mps:   3.0
-    opp_drive_topic:  "/opp_drive"
+    max_speed_mps: 3.0
+    opp_drive_topic: "/opp_drive"
     # -------------------------------------------------------
     # Pure Pursuit
     # -------------------------------------------------------
-    wheelbase:            0.33
-    min_lookahead:        0.3        # metres
-    max_lookahead:        1.8        # metres
-    lookahead_ratio:      9.0
-    K_p:                  0.5
-    steering_limit:       25.0       # degrees
-    velocity_percentage:  1.2
+    wheelbase: 0.33
+    min_lookahead: 0.6 #0.3 # metres
+    max_lookahead: 1.8 # metres
+    lookahead_ratio: 8.0 #9
+    K_p: 0.5
+    steering_limit: 25.0 # degrees
+    velocity_percentage: 1.2
 
-    max_steering_rate:         0.15  # max radians the wheels can turn per frame
+    max_steering_rate: 0.15 # max radians the wheels can turn per frame

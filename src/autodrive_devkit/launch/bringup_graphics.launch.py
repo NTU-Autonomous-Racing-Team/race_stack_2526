@@ -61,6 +61,7 @@ def generate_launch_description():
             package='rviz2',
             executable='rviz2',
             name='rviz',
+            parameters=[{'use_sim_time': True}],
             arguments=['-d', [FindPackageShare("autodrive_roboracer"), '/rviz', '/autodrive_roboracer.rviz',]]
         ),
         Node(

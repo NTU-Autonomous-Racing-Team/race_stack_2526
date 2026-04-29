@@ -26,6 +26,7 @@ def generate_launch_description():
         executable='particle_filter',
         name='particle_filter',
         parameters=[LaunchConfiguration('localize_config')],
+        prefix=['xterm -e gdb -ex run --args python3'],
         output='screen'
     )
     map_server_node = Node(

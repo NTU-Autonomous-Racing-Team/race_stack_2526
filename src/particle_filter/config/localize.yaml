@@ -1,14 +1,14 @@
 map_server:
   ros__parameters:
-    map: porto
+    map: "simracing26"
 
 particle_filter:
   ros__parameters:
-    scan_topic: '/autodrive/roboracer_1/lidar'
-    odometry_topic: '/autodrive/roboracer_1/odom'
-    map_frame: 'map'
-    odom_frame: 'world'
-    base_frame: 'roboracer_1'
+    scan_topic: "/autodrive/roboracer_1/lidar"
+    odometry_topic: "/autodrive/roboracer_1/odom"
+    map_frame: "map"
+    odom_frame: "world"
+    base_frame: "roboracer_1"
     publish_odom: 1
 
     angle_step: 18
@@ -18,7 +18,7 @@ particle_filter:
     viz: 1
     max_viz_particles: 60
 
-    range_method: 'cddt'
+    range_method: "cddt"
     theta_discretization: 112
     rangelib_variant: 2
 

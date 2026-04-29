@@ -206,7 +206,11 @@ class ParticleFiler(Node):
             '/clicked_point',
             self.clicked_pose,
             1)
-
+        
+        # hardcoded iniital pose
+        self.particles = np.zeros((self.MAX_PARTICLES, 3))
+        self.initialize_hardcoded_pose(spawn_x=-1.2841, spawn_y=-7.3593, spawn_theta=0.0)
+        
         self.get_logger().info('Finished initializing, waiting on messages...')
 
     def get_omap(self):
@@ -408,6 +412,23 @@ class ParticleFiler(Node):
         Accept RViz 2D Goal Pose clicks as an alternative initialization input.
         '''
         self.initialize_particles_pose(msg.pose)
+    
+    def initialize_hardcoded_pose(self, spawn_x, spawn_y, spawn_theta):
+        '''
+        Hardcode the initial spawn point to bypass RViz clicking.
+        '''
+        self.get_logger().info(f'HARDCODING POSE TO: [{spawn_x}, {spawn_y}]')
+        self.state_lock.acquire()
+        
+        # Reset weights
+        self.weights = np.ones(self.MAX_PARTICLES) / float(self.MAX_PARTICLES)
+        
+        # Spawn particles with a tiny 0.1m / 0.1rad spread to help the filter converge
+        self.particles[:,0] = spawn_x + np.random.normal(loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+        self.particles[:,1] = spawn_y + np.random.normal(loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+        self.particles[:,2] = spawn_theta + np.random.normal(loc=0.0, scale=0.1, size=self.MAX_PARTICLES)
+        
+        self.state_lock.release()
 
     def initialize_particles_pose(self, pose):
         '''

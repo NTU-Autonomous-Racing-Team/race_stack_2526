@@ -4,6 +4,8 @@ set -euo pipefail
 echo "[setup_dep] Refreshing apt metadata..."
 apt-get update
 
+apt-get install -y xterm gdb
+
 echo "[setup_dep] Installing build prerequisites for range_libc..."
 apt-get install -y \
 	build-essential \
